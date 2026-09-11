@@ -35,7 +35,6 @@ if (( EUID != 0 )); then
     exit 1
   fi
   privilege=(sudo)
-  sudo -v
 fi
 ref=${SSH_LOGGER_REF:-main}
 if [[ ! $ref =~ ^[a-zA-Z0-9][a-zA-Z0-9._/-]*$ ]]; then
