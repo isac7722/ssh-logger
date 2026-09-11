@@ -28,14 +28,16 @@
 | --- | --- |
 | `GET /api/health` | 인증 없는 최소 상태 점검 |
 | `GET /api/overview?day_start=<ms>` | 현재 세션, 오늘 세션 시작·인증 실패 기록, 서버 수집 상태 집계 |
-| `GET /api/servers` | 등록 서버 상태 및 누적 손실·공백 카운터 |
+| `GET /api/servers` | 폐기되지 않은 서버 상태 및 누적 손실·공백 카운터 |
 | `POST /api/servers` | `{"name":"prod-01"}` 등록, id/token 한 번 반환 |
 | `POST /api/servers/{id}/rotate` | 기존 토큰 무효화, 새 토큰 반환 |
-| `POST /api/servers/{id}/revoke` | 수집 인증 폐기, 기록 유지 |
+| `POST /api/servers/{id}/revoke` | 서버 논리 삭제 및 수집 인증 폐기, DB 기록 유지 |
 | `GET /api/events` | 활동 검색 |
 | `GET /api/sessions` | 접속 세션 조회 |
 | `GET /api/settings` | 보관 기간 조회 |
 | `PUT /api/settings` | `{"retention_days":30}`, 1–365일 |
+
+서버 폐기는 `revoked=1`로 표시하는 논리 삭제다. 폐기된 서버와 관련 활동·세션은 조회 API, 활동 건수 및 전체 현황 집계에서 제외한다. `server_id`를 직접 지정해도 기록을 반환하지 않는다. 기존에 폐기된 서버에도 동일하게 적용한다. 토큰 재발급 및 재폐기 요청은 404이며, 기존 토큰 수집 요청은 401이다. DB 행은 즉시 삭제하지 않고 기존 보관 기간 정책에 따라 정리한다. 이름의 고유 제약은 유지하므로 새 서버 등록 시 다른 이름을 사용해야 한다.
 
 events 필터: `from`, `to`(밀리초, 기본 최근 24시간, 최대 366일), `server_id`, `user`, `ip`, `session_id`, `kind`, `q`, `page`(0부터). q는 프로그램·인자의 대소문자를 구분하는 부분 문자열 검색이다. sessions 필터: `server_id`, `user`, `ip`, `active=1`(종료가 관측되지 않은 세션), `page`.
 

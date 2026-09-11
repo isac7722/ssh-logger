@@ -893,7 +893,7 @@ function App() {
                               onClick={() => {
                                 if (
                                   confirm(
-                                    "이 서버의 수집 인증을 폐기할까요? 기존 기록은 유지됩니다.",
+                                    "이 서버를 폐기할까요? 수집을 차단하고 서버와 관련 기록을 화면에서 숨깁니다. DB 기록은 보관 기간에 따라 유지됩니다.",
                                   )
                                 )
                                   action(async () => {
@@ -901,7 +901,36 @@ function App() {
                                       "/servers/" + s.id + "/revoke",
                                       "POST",
                                     );
+                                    setCredential((current) =>
+                                      current?.id === s.id ? null : current,
+                                    );
+                                    if (server === s.id) setServer("");
+                                    setSelected((current) =>
+                                      current?.server_id === s.id
+                                        ? null
+                                        : current,
+                                    );
+                                    setRows((current) =>
+                                      current.filter(
+                                        (row) => row.server_id !== s.id,
+                                      ),
+                                    );
+                                    setSessions((current) =>
+                                      current.filter(
+                                        (row) => row.server_id !== s.id,
+                                      ),
+                                    );
                                     setServers(await api("/servers"));
+                                    setStats(
+                                      (
+                                        await api(
+                                          "/overview?day_start=" + localDay(),
+                                        )
+                                      )[0] || {},
+                                    );
+                                    setNotice(
+                                      "서버를 폐기했습니다. 관련 기록은 보관 기간에 따라 DB에 유지됩니다.",
+                                    );
                                   });
                               }}
                             >

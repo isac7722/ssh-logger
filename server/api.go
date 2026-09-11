@@ -230,7 +230,7 @@ func (a *App) query(w http.ResponseWriter, r *http.Request, q string, args ...an
 	reply(w, 200, v)
 }
 func (a *App) servers(w http.ResponseWriter, r *http.Request) {
-	a.query(w, r, "SELECT id,name,created,last_seen,health,backlog,dropped,revoked FROM servers ORDER BY name")
+	a.query(w, r, "SELECT id,name,created,last_seen,health,backlog,dropped,revoked FROM servers WHERE revoked=0 ORDER BY name")
 }
 func (a *App) createServer(w http.ResponseWriter, r *http.Request) {
 	var b struct {
@@ -261,7 +261,7 @@ func (a *App) changeToken(w http.ResponseWriter, r *http.Request, revoke bool) {
 	token := model.ID()
 	var count int64
 	e := a.store.transaction(r.Context(), func(tx *sql.Tx) error {
-		v, e := tx.ExecContext(r.Context(), "UPDATE servers SET token_hash=?,revoked=? WHERE id=?", hash(token), revoke, r.PathValue("id"))
+		v, e := tx.ExecContext(r.Context(), "UPDATE servers SET token_hash=?,revoked=? WHERE id=? AND revoked=0", hash(token), revoke, r.PathValue("id"))
 		if e != nil {
 			return e
 		}
@@ -435,6 +435,7 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	summary := r.URL.Query().Get("summary") == "1"
+	where += " AND s.revoked=0"
 	from := ` FROM events e JOIN servers s ON s.id=e.server_id LEFT JOIN sessions se ON se.server_id=e.server_id AND se.id=e.session_id`
 	visibleWhere := where
 	if activity == "important" {
@@ -483,7 +484,7 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) sessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	where := " WHERE 1=1"
+	where := " WHERE s.revoked=0"
 	args := []any{time.Now().Add(-60 * time.Second).UnixMilli()}
 	for _, key := range []string{"server_id", "user", "ip"} {
 		if v := q.Get(key); v != "" {
@@ -508,7 +509,7 @@ func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 		}
 		start = n
 	}
-	a.query(w, r, `SELECT (SELECT COUNT(*) FROM sessions se JOIN servers s ON s.id=se.server_id WHERE ended IS NULL AND live=1 AND last_seen>? AND s.health='ok' AND revoked=0) AS active,(SELECT COUNT(*) FROM events WHERE kind='session_start' AND time>=?) AS logins,(SELECT COUNT(*) FROM events WHERE kind='login_failure' AND time>=?) AS failures,(SELECT COUNT(*) FROM servers WHERE last_seen>? AND health='ok' AND revoked=0) AS healthy,(SELECT COUNT(*) FROM servers) AS total,(SELECT COUNT(*) FROM sessions se JOIN servers s ON s.id=se.server_id WHERE ended IS NULL AND (live=0 OR last_seen<=? OR health!='ok' OR revoked=1)) AS unknown`, now.Add(-60*time.Second).UnixMilli(), start, start, now.Add(-60*time.Second).UnixMilli(), now.Add(-60*time.Second).UnixMilli())
+	a.query(w, r, `SELECT (SELECT COUNT(*) FROM sessions se JOIN servers s ON s.id=se.server_id WHERE ended IS NULL AND live=1 AND last_seen>? AND s.health='ok' AND revoked=0) AS active,(SELECT COUNT(*) FROM events e JOIN servers s ON s.id=e.server_id WHERE s.revoked=0 AND e.kind='session_start' AND e.time>=?) AS logins,(SELECT COUNT(*) FROM events e JOIN servers s ON s.id=e.server_id WHERE s.revoked=0 AND e.kind='login_failure' AND e.time>=?) AS failures,(SELECT COUNT(*) FROM servers WHERE last_seen>? AND health='ok' AND revoked=0) AS healthy,(SELECT COUNT(*) FROM servers WHERE revoked=0) AS total,(SELECT COUNT(*) FROM sessions se JOIN servers s ON s.id=se.server_id WHERE s.revoked=0 AND ended IS NULL AND (live=0 OR last_seen<=? OR health!='ok')) AS unknown`, now.Add(-60*time.Second).UnixMilli(), start, start, now.Add(-60*time.Second).UnixMilli(), now.Add(-60*time.Second).UnixMilli())
 }
 func (a *App) settings(w http.ResponseWriter, r *http.Request) {
 	a.query(w, r, "SELECT retention_days FROM settings")
