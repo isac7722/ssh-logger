@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-const currentSchemaVersion = 3
+const currentSchemaVersion = 4
 
 func (s *Store) migrate() error {
 	tx, err := s.db.Begin()
@@ -37,6 +37,18 @@ func (s *Store) migrate() error {
 			"CREATE TABLE auth_sessions(token_hash TEXT PRIMARY KEY,csrf TEXT NOT NULL,expires INTEGER NOT NULL,username TEXT NOT NULL REFERENCES admins(username))",
 			"CREATE INDEX auth_sessions_username ON auth_sessions(username)",
 			"UPDATE schema_version SET version=3",
+		} {
+			if _, err = tx.Exec(q); err != nil {
+				return err
+			}
+		}
+	}
+	if version < 4 {
+		for _, q := range []string{
+			"CREATE TABLE IF NOT EXISTS server_control(server_id TEXT PRIMARY KEY REFERENCES servers(id),enabled INTEGER NOT NULL)",
+			"CREATE TABLE IF NOT EXISTS session_terminations(id TEXT PRIMARY KEY,server_id TEXT NOT NULL REFERENCES servers(id),session_id TEXT NOT NULL,requested_by TEXT NOT NULL,created INTEGER NOT NULL,expires INTEGER NOT NULL,status TEXT NOT NULL,error TEXT NOT NULL DEFAULT '')",
+			"CREATE INDEX IF NOT EXISTS termination_session ON session_terminations(server_id,session_id,created DESC)",
+			"UPDATE schema_version SET version=4",
 		} {
 			if _, err = tx.Exec(q); err != nil {
 				return err

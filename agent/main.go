@@ -75,6 +75,8 @@ func main() {
 	next := time.Now()
 	delay := 5 * time.Second
 	lastCheckpoint := time.Now()
+	canTerminate := terminationAvailable()
+	var results []model.TerminationResult
 	for {
 		select {
 		case <-ctx.Done():
@@ -100,8 +102,9 @@ func main() {
 			if e != nil {
 				health = "session_scan_error"
 			}
-			b := model.Batch{Events: events, Backlog: count, Dropped: s.cp.Dropped, Health: health, ActiveSessions: active}
-			if e = send(ctx, client, strings.TrimRight(*endpoint, "/")+"/api/ingest", *tokenFile, b); e != nil {
+			b := model.Batch{CanTerminate: canTerminate, TerminationResults: results, Events: events, Backlog: count, Dropped: s.cp.Dropped, Health: health, ActiveSessions: active}
+			response, sendErr := sendBatch(ctx, client, strings.TrimRight(*endpoint, "/")+"/api/ingest", *tokenFile, b)
+			if e = sendErr; e != nil {
 				log.Printf("delivery failed (records retained): %v", e)
 				next = time.Now().Add(delay)
 				delay *= 2
@@ -109,6 +112,16 @@ func main() {
 					delay = 60 * time.Second
 				}
 				continue
+			}
+			results = nil
+			for _, command := range response.Terminations {
+				result := model.TerminationResult{ID: command.ID}
+				if !canTerminate {
+					result.Error = "세션 종료를 지원하지 않는 에이전트입니다."
+				} else if err := terminateAuditSession(boot, command); err != nil {
+					result.Error = err.Error()
+				}
+				results = append(results, result)
 			}
 			if e = s.ack(events); e != nil {
 				log.Printf("acknowledgement: %v", e)
@@ -134,28 +147,37 @@ func readToken(path string) (string, error) {
 	return t, nil
 }
 func send(ctx context.Context, c *http.Client, url, path string, b model.Batch) error {
+	_, err := sendBatch(ctx, c, url, path, b)
+	return err
+}
+func sendBatch(ctx context.Context, c *http.Client, url, path string, b model.Batch) (model.IngestResponse, error) {
+	var response model.IngestResponse
 	token, e := readToken(path)
 	if e != nil {
-		return e
+		return response, e
 	}
 	raw, e := json.Marshal(b)
 	if e != nil {
-		return e
+		return response, e
 	}
 	r, e := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
 	if e != nil {
-		return e
+		return response, e
 	}
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+token)
 	res, e := c.Do(r)
 	if e != nil {
-		return e
+		return response, e
 	}
 	defer res.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
+
 	if res.StatusCode != 200 {
-		return fmt.Errorf("HTTP %d", res.StatusCode)
+		return response, fmt.Errorf("HTTP %d", res.StatusCode)
 	}
-	return nil
+	e = json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&response)
+	if e == io.EOF {
+		e = nil
+	}
+	return response, e
 }

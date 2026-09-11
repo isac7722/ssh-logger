@@ -11,7 +11,7 @@ if not source.is_file():
 with sqlite3.connect(source.as_uri() + '?mode=ro', uri=True) as db:
     if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
         raise SystemExit('백업 파일 무결성 검사 실패')
-    if db.execute('SELECT version FROM schema_version').fetchone()[0] not in (1, 2, 3):
+    if db.execute('SELECT version FROM schema_version').fetchone()[0] not in (1, 2, 3, 4):
         raise SystemExit('지원하지 않는 백업 스키마')
 compose = ['docker', 'compose', '-f', os.environ.get('COMPOSE_FILE', 'compose.yaml')]
 # The CLI validates before replacement; always retain a fresh backup first.

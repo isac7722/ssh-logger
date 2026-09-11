@@ -132,6 +132,7 @@ func (s *Store) cleanup(ctx context.Context) error {
 		}
 		cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).UnixMilli()
 		for _, q := range []string{
+			"DELETE FROM session_terminations WHERE created < ?",
 			"DELETE FROM events WHERE seq IN (SELECT seq FROM events WHERE time < ? LIMIT 1000)",
 			"DELETE FROM sessions WHERE rowid IN (SELECT rowid FROM sessions WHERE COALESCE(ended,started) < ? AND (live=0 OR server_id IN (SELECT id FROM servers WHERE last_seen < CAST(strftime('%s','now') AS INTEGER)*1000-60000 OR revoked=1)) LIMIT 1000)",
 			"DELETE FROM auth_sessions WHERE expires < ?",

@@ -41,7 +41,7 @@
 
 events 필터: `from`, `to`(밀리초, 기본 최근 24시간, 최대 366일), `server_id`, `user`, `ip`, `session_id`, `kind`, `q`, `page`(0부터). q는 프로그램·인자의 대소문자를 구분하는 부분 문자열 검색이다. sessions 필터: `server_id`, `user`, `ip`, `active=1`(종료가 관측되지 않은 세션), `page`.
 
-이벤트는 시각 내림차순, 같은 시각이면 서버 내부 seq 내림차순이다. 한 페이지 표시량은 50개이며 다음 페이지 존재 여부 확인을 위해 최대 51개를 반환한다. 세션은 접속 시각 내림차순이다. `active`는 최근 서버 상태 및 /proc에서 확인된 세션, `unknown`은 상태 확인 불가, `ended`는 종료 기록 관측을 의미한다. `linked=0` 실행은 SSH 세션임을 확정하지 않는다.
+이벤트는 시각 내림차순, 같은 시각이면 서버 내부 seq 내림차순이다. 한 페이지 표시량은 50개이며 다음 페이지 존재 여부 확인을 위해 최대 51개를 반환한다. 세션은 접속 시각 내림차순이다. `active`는 최근 서버 상태 및 /proc에서 확인된 세션, `unknown`은 상태 확인 불가, `ended`는 종료 기록 관측 또는 에이전트의 강제 종료 성공 보고를 의미한다. `linked=0` 실행은 SSH 세션임을 확정하지 않는다.
 
 ## 수집
 
@@ -86,3 +86,12 @@ kind는 `login_success`, `login_failure`, `session_start`, `session_end`, `exec`
 ```
 
 수집 이벤트에 선택적으로 `pid`(1–2147483647), `ppid`(0–2147483647)를 보낼 수 있다. 생략 또는 null은 미수집이다. 부모 PID 0도 유효한 값이다. 오래된 수집기가 필드를 보내지 않아도 수신하며, 기존 기록에 PID를 소급하여 채우지 않는다. 이 필드만으로 부모 프로그램명이나 정확한 프로세스 수명을 확정하지 않는다.
+
+
+## 세션 강제 종료
+
+`POST /api/servers/{id}/sessions/{session}/terminate`는 관리자 인증·Origin·CSRF 검사를 거쳐 `202 {"id":"요청 ID","status":"pending"}`을 반환한다. session 경로 값은 URL 인코딩한다. 활성 세션, 최근 60초 이내 정상 heartbeat, 종료 지원 에이전트가 필요하며 조건이 맞지 않으면 409다. 만료 전 중복 요청은 같은 요청 ID를 반환한다.
+
+업데이트된 에이전트는 ingest에 `can_terminate:true`를 전송한다. 서버는 응답의 `terminations` 배열로 `{"id":"요청 ID","session_id":"boot:7","expires":1234567890000}`을 전달한다. 요청은 30초간 유효하며 결과가 확인될 때까지 재전달될 수 있다. 에이전트는 실행 전 부팅·세션 ID와 만료를 검사하고 pidfd로 프로세스를 고정해 SIGKILL을 보낸다. 다음 ingest의 `termination_results:[{"id":"요청 ID","error":""}]`로 성공을, error 문자열로 실패를 보고한다. 결과 전송 실패 시 재전송하며 서버는 동일 서버 토큰의 결과만 반영한다. 에이전트 재시작으로 미보고 결과가 소실될 경우 재실행 또는 만료 상태가 될 수 있다.
+
+세션 조회는 `can_terminate`(0/1), `termination_status`(null/pending/succeeded/failed/expired), `termination_error`를 포함한다. 요청 접수만으로 종료 상태를 변경하지 않는다. 성공 보고 시 ended에는 서버가 결과를 받은 시각을 기록한다. 만료는 실행 성공 여부를 확인하지 못한 상태이므로 세션 상태도 함께 확인해야 한다. 스키마 4에 요청자·대상·시각·결과를 저장하고 보관 기간에 따라 정리한다.

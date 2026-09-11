@@ -21,12 +21,27 @@ type Event struct {
 	PID           *int     `json:"pid,omitempty"`
 	PPID          *int     `json:"ppid,omitempty"`
 }
+type Termination struct {
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	Expires   int64  `json:"expires"`
+}
+type TerminationResult struct {
+	ID    string `json:"id"`
+	Error string `json:"error"`
+}
+type IngestResponse struct {
+	Accepted     int           `json:"accepted"`
+	Terminations []Termination `json:"terminations,omitempty"`
+}
 type Batch struct {
-	Events         []Event  `json:"events"`
-	Health         string   `json:"health"`
-	Backlog        int      `json:"backlog"`
-	Dropped        int64    `json:"dropped"`
-	ActiveSessions []string `json:"active_sessions"`
+	CanTerminate       bool                `json:"can_terminate,omitempty"`
+	TerminationResults []TerminationResult `json:"termination_results,omitempty"`
+	Events             []Event             `json:"events"`
+	Health             string              `json:"health"`
+	Backlog            int                 `json:"backlog"`
+	Dropped            int64               `json:"dropped"`
+	ActiveSessions     []string            `json:"active_sessions"`
 }
 
 func ID() string {

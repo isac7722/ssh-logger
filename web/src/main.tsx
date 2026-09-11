@@ -364,6 +364,37 @@ function App() {
       )}
     </div>
   );
+  const [terminating, setTerminating] = useState("");
+  const terminateSession = async (s: Row) => {
+    if (
+      !confirm(
+        `${s.server_name}의 ${s.user || "알 수 없는 계정"} (${s.ip || "IP 없음"}) 세션을 강제로 종료할까요?\n이 세션의 실행 중인 프로세스가 종료되며 저장하지 않은 작업은 손실될 수 있습니다.`,
+      )
+    )
+      return;
+    setTerminating(s.server_id + s.id);
+    setError("");
+    try {
+      await api(
+        `/servers/${encodeURIComponent(s.server_id)}/sessions/${encodeURIComponent(s.id)}/terminate`,
+        "POST",
+      );
+      setSessions((current) =>
+        current.map((row) =>
+          row.server_id === s.server_id && row.id === s.id
+            ? { ...row, termination_status: "pending" }
+            : row,
+        ),
+      );
+      setNotice(
+        "강제 종료를 요청했습니다. 에이전트 처리 결과가 자동으로 갱신됩니다.",
+      );
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setTerminating("");
+    }
+  };
   const sessionTable = (items: Row[]) => (
     <div className="table-wrap">
       <table>
@@ -417,6 +448,43 @@ function App() {
                 >
                   상세 보기 ↗
                 </button>
+                {s.status === "active" && (
+                  <button
+                    className="danger"
+                    disabled={
+                      !s.can_terminate ||
+                      !!terminating ||
+                      s.termination_status === "pending"
+                    }
+                    title={
+                      !s.can_terminate
+                        ? "에이전트 업데이트 또는 실행 환경 확인이 필요합니다."
+                        : "이 세션의 프로세스를 강제로 종료합니다."
+                    }
+                    onClick={() => terminateSession(s)}
+                  >
+                    {s.termination_status === "pending"
+                      ? "종료 요청 중…"
+                      : "강제 종료"}
+                  </button>
+                )}
+                {s.termination_status && (
+                  <small role="status">
+                    {
+                      (
+                        {
+                          pending: "종료 요청 대기",
+                          succeeded: "강제 종료 완료",
+                          failed: "종료 실패",
+                          expired: "종료 요청 만료",
+                        } as Record<string, string>
+                      )[s.termination_status]
+                    }
+                    {s.termination_status === "failed" && s.termination_error
+                      ? `: ${s.termination_error}`
+                      : ""}
+                  </small>
+                )}
               </td>
             </tr>
           ))}
@@ -803,8 +871,8 @@ function App() {
                     <button onClick={() => setCredential(null)}>닫기</button>
                   </div>
                   <p>
-                    Ubuntu 24.04 x86_64 또는 ARM64 대상 서버에서 아래 명령을 실행하세요.
-                    중앙 서버 주소와 토큰은 설치 중 입력합니다.
+                    Ubuntu 24.04 x86_64 또는 ARM64 대상 서버에서 아래 명령을
+                    실행하세요. 중앙 서버 주소와 토큰은 설치 중 입력합니다.
                   </p>
                   <pre>
                     bash &lt;(curl -fsSL

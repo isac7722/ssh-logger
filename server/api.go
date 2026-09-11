@@ -77,6 +77,7 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("POST /api/servers/{id}/revoke", a.auth(a.revoke))
 	m.HandleFunc("GET /api/events", a.auth(a.events))
 	m.HandleFunc("GET /api/sessions", a.auth(a.sessions))
+	m.HandleFunc("POST /api/servers/{id}/sessions/{session}/terminate", a.auth(a.terminateSession))
 	m.HandleFunc("GET /api/overview", a.auth(a.overview))
 	m.HandleFunc("GET /api/settings", a.auth(a.settings))
 	m.HandleFunc("PUT /api/settings", a.auth(a.saveSettings))
@@ -292,9 +293,15 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &b) {
 		return
 	}
-	if len(b.Events) > 500 || len(b.ActiveSessions) > 10000 || len(b.Health) > 200 || b.Backlog < 0 || b.Dropped < 0 {
+	if len(b.TerminationResults) > 100 || len(b.Events) > 500 || len(b.ActiveSessions) > 10000 || len(b.Health) > 200 || b.Backlog < 0 || b.Dropped < 0 {
 		fail(w, 400, "invalid batch")
 		return
+	}
+	for _, result := range b.TerminationResults {
+		if len(result.ID) > 200 || len(result.Error) > 500 {
+			fail(w, 400, "invalid termination result")
+			return
+		}
 	}
 	now := time.Now().UnixMilli()
 	for i := range b.Events {
@@ -317,6 +324,7 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var commands []model.Termination
 	unauthorized := errors.New("unauthorized")
 	err := a.store.transaction(r.Context(), func(tx *sql.Tx) error {
 		var server string
@@ -325,6 +333,11 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 				return unauthorized
 			}
 			return e
+		}
+		var controlErr error
+		commands, controlErr = ingestTerminations(r, tx, server, b, now)
+		if controlErr != nil {
+			return controlErr
 		}
 		for _, e := range b.Events {
 			args, _ := json.Marshal(e.Args)
@@ -368,7 +381,7 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "storage unavailable; retry batch")
 		return
 	}
-	reply(w, 200, map[string]int{"accepted": len(b.Events)})
+	reply(w, 200, model.IngestResponse{Accepted: len(b.Events), Terminations: commands})
 }
 func page(r *http.Request) int {
 	p, _ := strconv.Atoi(r.URL.Query().Get("page"))
@@ -496,7 +509,9 @@ func (a *App) sessions(w http.ResponseWriter, r *http.Request) {
 		where += " AND se.ended IS NULL"
 	}
 	args = append(args, page(r)*50)
-	a.query(w, r, `SELECT se.*,s.name AS server_name,CASE WHEN se.ended IS NOT NULL THEN 'ended' WHEN se.live=1 AND s.last_seen>? AND s.revoked=0 AND s.health='ok' THEN 'active' ELSE 'unknown' END AS status FROM sessions se JOIN servers s ON s.id=se.server_id`+where+` ORDER BY se.started DESC LIMIT 51 OFFSET ?`, args...)
+	a.query(w, r, `SELECT se.*,s.name AS server_name,COALESCE((SELECT enabled FROM server_control WHERE server_id=s.id),0) AS can_terminate,
+ (SELECT CASE WHEN status='pending' AND expires<CAST(strftime('%s','now') AS INTEGER)*1000 THEN 'expired' ELSE status END FROM session_terminations WHERE server_id=se.server_id AND session_id=se.id ORDER BY created DESC,rowid DESC LIMIT 1) AS termination_status,
+ (SELECT error FROM session_terminations WHERE server_id=se.server_id AND session_id=se.id ORDER BY created DESC,rowid DESC LIMIT 1) AS termination_error,CASE WHEN se.ended IS NOT NULL THEN 'ended' WHEN se.live=1 AND s.last_seen>? AND s.revoked=0 AND s.health='ok' THEN 'active' ELSE 'unknown' END AS status FROM sessions se JOIN servers s ON s.id=se.server_id`+where+` ORDER BY se.started DESC LIMIT 51 OFFSET ?`, args...)
 }
 func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
