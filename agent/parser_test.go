@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sshlogger/internal/model"
@@ -144,5 +145,23 @@ func TestProcessIDsComeFromAuditRecord(t *testing.T) {
 	}
 	if processID("0", 0) == nil || *processID("0", 0) != 0 || processID("-1", 0) != nil || processID("2147483648", 0) != nil {
 		t.Fatal("invalid PID handling")
+	}
+}
+
+func TestARM64ExecSyscalls(t *testing.T) {
+	for _, syscall := range []int{221, 281} {
+		t.Run(fmt.Sprint(syscall), func(t *testing.T) {
+			raw := fmt.Sprintf(`type=SYSCALL msg=audit(1700000000.123:42): arch=c00000b7 syscall=%d success=yes pid=54321 ppid=12345 auid=1000 uid=0 euid=0 ses=7 exe="/usr/bin/curl"
+type=EXECVE msg=audit(1700000000.123:42): argc=3 a0="curl" a1="--token" a2="secret"
+type=EOE msg=audit(1700000000.123:42):`, syscall)
+			events := eventsFor(records(raw), "arm-boot", func(uid string) string { return uid })
+			if len(events) != 1 {
+				t.Fatal(events)
+			}
+			e := events[0]
+			if e.Kind != "exec" || e.SessionID != "arm-boot:7" || e.PID == nil || *e.PID != 54321 || e.PPID == nil || *e.PPID != 12345 || e.LoginUID != "1000" || e.EffectiveUser != "0" || e.Outcome != "yes" || strings.Join(e.Args, " ") != "curl --token [REDACTED]" {
+				t.Fatalf("bad ARM64 execution: %#v", e)
+			}
+		})
 	}
 }

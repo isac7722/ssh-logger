@@ -10,6 +10,8 @@ if [[ ! -x "$base/bin/ssh-logger-agent" || ! -x "$binary" || ! -f /etc/ssh-logge
   echo 'make agent로 빌드하고, 기존 수집기가 설치된 서버에서 실행하세요.' >&2
   exit 1
 fi
+source "$base/deploy/platform.sh"
+check_agent_platform "$base/bin/ssh-logger-agent"
 stage=$(mktemp -d /usr/local/bin/.ssh-logger-update.XXXXXX)
 trap 'rm -rf -- "$stage"' EXIT
 install -m 755 "$base/bin/ssh-logger-agent" "$stage/agent"

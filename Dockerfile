@@ -5,14 +5,16 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.26-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS go
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS go
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY internal/ ./internal/
 COPY server/ ./server/
 COPY agent/ ./agent/
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/server ./server && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/ssh-logger-agent ./agent
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/server ./server && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/ssh-logger-agent ./agent
 
 FROM scratch AS agent
 COPY --from=go /out/ssh-logger-agent /ssh-logger-agent

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"runtime"
 	"sshlogger/internal/model"
 	"strings"
 	"syscall"
@@ -20,6 +21,7 @@ import (
 )
 
 func main() {
+	platform := flag.Bool("platform", false, "print binary OS/architecture and exit")
 	endpoint := flag.String("url", os.Getenv("SSHLOGGER_URL"), "central HTTPS origin")
 	tokenFile := flag.String("token-file", "/etc/ssh-logger/token", "token file")
 	source := flag.String("audit-log", "/var/log/audit/audit.log", "auditd log path")
@@ -28,6 +30,10 @@ func main() {
 	fromStart := flag.Bool("from-start", false, "read existing audit log on first start (only current boot fixtures)")
 	insecure := flag.Bool("allow-http", false, "allow plaintext HTTP for isolated development")
 	flag.Parse()
+	if *platform {
+		fmt.Printf("%s/%s\n", runtime.GOOS, runtime.GOARCH)
+		return
+	}
 	u, e := url.Parse(*endpoint)
 	if e != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		log.Fatal("url must be an HTTP(S) origin")

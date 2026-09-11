@@ -803,7 +803,7 @@ function App() {
                     <button onClick={() => setCredential(null)}>닫기</button>
                   </div>
                   <p>
-                    Ubuntu 24.04 x86_64 대상 서버에서 아래 명령을 실행하세요.
+                    Ubuntu 24.04 x86_64 또는 ARM64 대상 서버에서 아래 명령을 실행하세요.
                     중앙 서버 주소와 토큰은 설치 중 입력합니다.
                   </p>
                   <pre>

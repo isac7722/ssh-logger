@@ -1,0 +1,3 @@
+# Native 64-bit AArch64 execution only; 32-bit ARM compatibility is not supported.
+# loginuid includes root SSH sessions and may include local login sessions.
+-a always,exit -F arch=b64 -S execve,execveat -F auid!=4294967295 -k sshlogger_exec

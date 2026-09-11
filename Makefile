@@ -1,8 +1,10 @@
 .DEFAULT_GOAL := help
 
 COMPOSE_FILE ?= compose.yaml
+AGENT_PLATFORM ?=
+AGENT_OUTPUT ?= bin
 
-.PHONY: up down reload status help check-compose init logs agent test backup restore integration
+.PHONY: up down reload status help check-compose init logs agent test backup restore integration test-deploy
 
 help:
 	@printf '%s\n' \
@@ -16,9 +18,10 @@ help:
 	  '기본 Compose 파일: compose.yaml (COMPOSE_FILE로 변경 가능)' \
 	  '  make init    초기 설정과 관리자 비밀번호 파일 생성' \
 	  '  make logs    중앙 서비스 로그 보기' \
-	  '  make agent   현재 아키텍처의 Linux 수집기 빌드' \
+	  '  make agent   Linux 수집기 빌드 (AGENT_PLATFORM=linux/arm64, AGENT_OUTPUT=bin/arm64 지정 가능)' \
 	  '  make test    Go 테스트와 프론트엔드 빌드' \
 	  '  make integration  격리된 수집기·브라우저 통합 검증' \
+	  '  make test-deploy  일회용 컨테이너에서 CPU별 설치·업데이트 모의 검증' \
 	  '  make backup  backups/에 SQLite 백업 생성' \
 	  '  make restore BACKUP=경로  현재 DB 백업 후 지정 파일 복원'
 
@@ -46,7 +49,7 @@ logs: check-compose
 	docker compose -f "$(COMPOSE_FILE)" logs -f --tail=100
 
 agent:
-	docker build --target agent --output type=local,dest=bin .
+	docker build $(if $(AGENT_PLATFORM),--platform "$(AGENT_PLATFORM)") --target agent --output "type=local,dest=$(AGENT_OUTPUT)" .
 
 test:
 	docker run --rm -v "$(CURDIR):/src" -w /src -v sshlogger-gomod:/go/pkg/mod -v sshlogger-gocache:/root/.cache/go-build golang:1.26-alpine go test ./...
@@ -62,3 +65,6 @@ integration: check-compose init
 	docker compose -f "$(COMPOSE_FILE)" build
 	$(MAKE) agent
 	bash scripts/test-integration.sh
+
+test-deploy:
+	docker run --rm --network none -e SSHLOGGER_DISPOSABLE_TEST=1 -v "$(CURDIR):/src:ro" mcr.microsoft.com/playwright:v1.63.0-noble bash /src/tests/deploy-platform.sh

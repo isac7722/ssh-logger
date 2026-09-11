@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Install the audit collector on Ubuntu 24.04 x86_64.
+# Install the audit collector on Ubuntu 24.04 x86_64 or ARM64.
 set -euo pipefail
 
-if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then
-  echo '지원 환경: Ubuntu 24.04 LTS / x86_64' >&2
+if [[ $(uname -s) != Linux ]]; then
+  echo '지원 환경: Ubuntu 24.04 LTS / x86_64 또는 ARM64' >&2
   exit 1
 fi
+case $(uname -m) in
+  x86_64) agent_arch=amd64 ;;
+  aarch64|arm64) agent_arch=arm64 ;;
+  *) echo '지원 CPU: x86_64 또는 ARM64 (32비트 ARM 미지원)' >&2; exit 1 ;;
+esac
 if [[ ! -r /etc/os-release ]]; then
   echo '/etc/os-release를 확인할 수 없습니다.' >&2
   exit 1
@@ -52,7 +57,7 @@ mkdir -p "$work/source/bin"
 printf '%s\n' '수집기를 빌드합니다. Go 도구와 의존성 다운로드에 시간이 걸릴 수 있습니다.'
 (
   cd "$work/source"
-  GOTOOLCHAIN=auto GOPATH="$work/go" GOMODCACHE="$work/go/pkg/mod" GOCACHE="$work/go-cache" CGO_ENABLED=0 \
+  GOOS=linux GOARCH="$agent_arch" GOTOOLCHAIN=auto GOPATH="$work/go" GOMODCACHE="$work/go/pkg/mod" GOCACHE="$work/go-cache" CGO_ENABLED=0 \
     go build -trimpath -ldflags='-s -w' -o bin/ssh-logger-agent ./agent
 )
 "${privilege[@]}" systemctl enable --now auditd

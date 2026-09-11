@@ -112,7 +112,8 @@ make init
 | `make status` | 중지된 컨테이너를 포함한 상태 확인 |
 | `make logs` | 중앙 서비스 로그 확인, Ctrl+C로 조회 종료 |
 | `make init` | 설정·초기 비밀번호 파일만 생성 |
-| `make agent` | `bin/ssh-logger-agent` 빌드 (빌드 머신의 Linux 아키텍처) |
+| `make agent` | `bin/ssh-logger-agent` 빌드 (`AGENT_PLATFORM=linux/arm64`로 교차 빌드 가능) |
+| `make test-deploy` | 일회용 컨테이너에서 CPU별 설치·업데이트 모의 검증 |
 | `make test` | Go 테스트, TypeScript 검사 및 웹 빌드 |
 | `make integration` | 18080 포트의 격리된 테스트 서비스에서 수집기·Chromium 검증 후 테스트 볼륨 삭제 |
 | `make backup` | 실행 중인 SQLite의 일관성 있는 백업 생성 |
@@ -137,7 +138,7 @@ ADMIN_USER=admin
 
 ## 서버 수집기 설치
 
-최초 지원 대상은 **Ubuntu 24.04 LTS / x86_64 / OpenSSH + PAM + auditd**입니다. 이 환경의 실서버 감사 커널 검증은 아직 필요합니다. 다른 배포판에서는 로그 형식·감사 규칙·서비스 이름을 확인해야 합니다.
+설치 지원 대상은 **Ubuntu 24.04 LTS / x86_64 또는 ARM64 / OpenSSH + PAM + auditd**입니다. ARM64는 네이티브 64비트 실행을 수집하며 32비트 ARM 호환 실행은 지원하지 않습니다. 이 환경의 실서버 감사 커널 검증은 아직 필요합니다. 다른 배포판에서는 로그 형식·감사 규칙·서비스 이름을 확인해야 합니다.
 
 ### 한 줄 설치
 
@@ -147,7 +148,7 @@ ADMIN_USER=admin
 bash <(curl -fsSL https://raw.githubusercontent.com/isac7722/ssh-logger/main/install.sh)
 ```
 
-설치 스크립트는 APT로 auditd·Go·curl·CA 인증서·tar를 설치하고, 소스를 다운로드해 수집기를 빌드합니다. Go 버전은 `go.mod`에 맞춰 자동 다운로드합니다. Docker나 수동 파일 복사는 필요하지 않습니다. 설치 중 중앙 서버의 HTTPS 주소와 토큰을 입력하세요. 시스템 패키지는 남고 임시 소스·Go 빌드 캐시는 종료 시 삭제합니다. GitHub, Ubuntu 패키지 저장소와 Go 모듈·도구 다운로드 경로에 접근할 수 있어야 합니다.
+설치 스크립트는 CPU를 자동 감지합니다(`x86_64` → `amd64`, `aarch64`·`arm64` → `arm64`). APT로 auditd·Go·curl·CA 인증서·tar를 설치하고, 소스를 다운로드해 수집기를 빌드합니다. Go 버전은 `go.mod`에 맞춰 자동 다운로드합니다. Docker나 수동 파일 복사는 필요하지 않습니다. 설치 중 중앙 서버의 HTTPS 주소와 토큰을 입력하세요. 시스템 패키지는 남고 임시 소스·Go 빌드 캐시는 종료 시 삭제합니다. GitHub, Ubuntu 패키지 저장소와 Go 모듈·도구 다운로드 경로에 접근할 수 있어야 합니다.
 
 기존 수집기가 있으면 설정을 덮어쓰지 않고 중단합니다. 기존 설치는 [수집기 업데이트 절차](#활동-기록과-수집기-업데이트)를 사용하세요. 특정 버전을 설치하려면 아래 두 `main`을 동일한 태그 또는 커밋 SHA로 바꿉니다.
 
@@ -158,7 +159,7 @@ SSH_LOGGER_REF=main bash <(curl -fsSL https://raw.githubusercontent.com/isac7722
 ### 수동 설치
 
 1. 대시보드의 **서버 관리 → 서버 등록**에서 이름을 입력하고 발급 토큰을 보관합니다.
-2. 중앙 프로젝트에서 `make agent`로 수집기를 빌드합니다.
+2. 중앙 프로젝트에서 `make agent`로 수집기를 빌드합니다. 대상 서버의 CPU가 다르면 아래 교차 빌드를 사용합니다.
 3. 대상 서버에 `bin/ssh-logger-agent`와 `deploy/` 디렉터리를 같은 상위 디렉터리 구조로 복사합니다.
 4. 대상 서버에 auditd를 설치하고 실행합니다.
 
@@ -168,6 +169,19 @@ sudo apt-get install auditd
 sudo systemctl enable --now auditd
 sudo bash deploy/install-agent.sh
 ```
+
+다른 CPU의 서버에 배포할 때는 대상 플랫폼을 지정해 빌드합니다. Go 빌드는 빌드 머신에서 실행하므로 ARM 에뮬레이터가 필요하지 않습니다.
+
+```bash
+# Intel/AMD 머신에서 ARM64 수집기 빌드
+make agent AGENT_PLATFORM=linux/arm64
+# x86_64 수집기 빌드
+make agent AGENT_PLATFORM=linux/amd64
+```
+
+결과는 `bin/ssh-logger-agent`이며 마지막 빌드가 덮어씁니다. 둘 다 보관하려면 `AGENT_OUTPUT=bin/arm64`처럼 출력 경로를 지정하고 대상 서버에서는 선택한 바이너리를 `bin/ssh-logger-agent` 위치에 복사하세요. `deploy/` 디렉터리는 전체를 함께 복사합니다. 설치·업데이트는 바이너리의 `-platform` 출력과 대상 CPU가 일치하는지 먼저 확인합니다.
+
+x86_64에는 `deploy/audit.rules`의 b64·b32 규칙, ARM64에는 `deploy/audit-arm64.rules`의 b64 규칙을 적용합니다. [Ubuntu auditctl 문서](https://manpages.ubuntu.com/manpages/noble/man8/auditctl.8.html)의 아키텍처별 시스템 호출 테이블을 사용합니다.
 
 설치 스크립트는 HTTPS 중앙 주소와 토큰을 입력받습니다. 토큰은 터미널 입력 시 표시하지 않고 `/etc/ssh-logger/token`에 저장합니다. 수집기는 토큰 파일을 전송할 때마다 읽으므로 토큰 재발급 후 이 파일을 바꾸면 됩니다.
 
