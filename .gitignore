@@ -1,0 +1,17 @@
+.env
+.secrets/
+backups/
+bin/
+data/
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+*.db
+*.db-wal
+*.db-shm
+
+tests/browser/node_modules/
+tests/browser/test-results/
+
+__pycache__/
+*.pyc

@@ -1,0 +1,23 @@
+[Unit]
+Description=SSH Logger audit collector
+After=network-online.target auditd.service
+Wants=network-online.target
+Requires=auditd.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/ssh-logger/agent.env
+ExecStart=/usr/local/bin/ssh-logger-agent
+Restart=on-failure
+RestartSec=5
+StateDirectory=ssh-logger
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/ssh-logger
+
+[Install]
+WantedBy=multi-user.target
