@@ -76,6 +76,14 @@ func main() {
 	delay := 5 * time.Second
 	lastCheckpoint := time.Now()
 	canTerminate := terminationAvailable()
+	var firewallResult *model.FirewallResult
+	cached, cacheErr := s.cachedFirewall()
+	if cacheErr != nil {
+		log.Fatalf("firewall cache: %v", cacheErr)
+	}
+	if cached != nil {
+		firewallResult = reconcileFirewall(ctx, s, *cached)
+	}
 	var results []model.TerminationResult
 	for {
 		select {
@@ -102,16 +110,23 @@ func main() {
 			if e != nil {
 				health = "session_scan_error"
 			}
-			b := model.Batch{CanTerminate: canTerminate, TerminationResults: results, Events: events, Backlog: count, Dropped: s.cp.Dropped, Health: health, ActiveSessions: active}
+			b := model.Batch{CanFirewall: firewallAvailable(), FirewallResult: firewallResult, CanTerminate: canTerminate, TerminationResults: results, Events: events, Backlog: count, Dropped: s.cp.Dropped, Health: health, ActiveSessions: active}
 			response, sendErr := sendBatch(ctx, client, strings.TrimRight(*endpoint, "/")+"/api/ingest", *tokenFile, b)
 			if e = sendErr; e != nil {
 				log.Printf("delivery failed (records retained): %v", e)
+				if cached != nil {
+					firewallResult = reconcileFirewall(ctx, s, *cached)
+				}
 				next = time.Now().Add(delay)
 				delay *= 2
 				if delay > 60*time.Second {
 					delay = 60 * time.Second
 				}
 				continue
+			}
+			if response.Firewall != nil {
+				cached = response.Firewall
+				firewallResult = reconcileFirewall(ctx, s, *cached)
 			}
 			results = nil
 			for _, command := range response.Terminations {

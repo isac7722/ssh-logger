@@ -4,17 +4,17 @@
 
 ## 관리자 인증
 
-`POST /api/login`에 `{"username":"admin","password":"..."}`를 보내면 HttpOnly 세션 쿠키와 `{"csrf":"...","username":"admin"}`를 받는다. 로그인 요청의 `Origin`은 `PUBLIC_ORIGIN`과 일치해야 한다. 로그인 후 변경 요청에는 같은 Origin과 `X-CSRF-Token`이 필요하다. `GET /api/me`로 현재 CSRF 토큰과 계정명을 확인하고 `POST /api/logout`으로 세션을 폐기한다.
+`POST /api/login`에 `{"username":"admin","password":"..."}`를 보내면 HttpOnly 세션 쿠키와 `{"csrf":"...","username":"admin"}`를 받는다. 로그인 요청의 `Origin`은 `PUBLIC_ORIGIN`과 일치해야 한다. 로그인 후 변경 요청에는 같은 Origin과 `X-CSRF-Token`이 필요하다. `GET /api/me`로 현재 CSRF 토큰·계정명·`role` (`super_admin` 또는 `admin`)을 확인하고 `POST /api/logout`으로 세션을 폐기한다.
 
 서버 세션은 12시간 후 만료된다. IP별 15분 동안 인증 실패가 10회 누적되면 이후 로그인 요청을 차단한다. 인증 실패만 횟수에 포함하며, 차단 전에 로그인에 성공하면 해당 IP의 실패 횟수를 초기화한다. 차단된 요청은 제한 시간을 연장하지 않는다. 프록시 환경에서는 기본적으로 프록시 IP 기준이며 임의의 X-Forwarded-For를 신뢰하지 않는다.
 
 ## 관리자 계정 관리
 
-모든 관리자는 같은 권한을 갖는다. 아래 API는 로그인 세션이 필요하며 변경 요청은 Origin·CSRF 검사를 적용한다.
+Super admin만 계정 목록·생성·권한 배정 API에 접근한다. 일반 관리자는 자신의 비밀번호를 변경할 수 있다. 아래 API는 로그인 세션이 필요하며 변경 요청은 Origin·CSRF 검사를 적용한다.
 
 | API | 동작 |
 | --- | --- |
-| `GET /api/admins` | `[{"username":"admin"}]` 형태로 계정명만 반환 |
+| `GET /api/admins` | 계정명, `role`, `server_ids`(서버 ID 배열을 JSON 문자열로 인코딩) 반환 |
 | `POST /api/admins` | `{"username":"operator","password":"..."}`로 관리자 생성, 201 및 계정명 반환. 중복 계정명은 409 |
 | `PUT /api/me/password` | `{"current_password":"...","new_password":"..."}`로 자신의 비밀번호 변경. 성공하면 200 및 `{"status":"ok"}` 반환, 해당 계정의 모든 세션 폐기 |
 
@@ -95,3 +95,25 @@ kind는 `login_success`, `login_failure`, `session_start`, `session_end`, `exec`
 업데이트된 에이전트는 ingest에 `can_terminate:true`를 전송한다. 서버는 응답의 `terminations` 배열로 `{"id":"요청 ID","session_id":"boot:7","expires":1234567890000}`을 전달한다. 요청은 30초간 유효하며 결과가 확인될 때까지 재전달될 수 있다. 에이전트는 실행 전 부팅·세션 ID와 만료를 검사하고 pidfd로 프로세스를 고정해 SIGKILL을 보낸다. 다음 ingest의 `termination_results:[{"id":"요청 ID","error":""}]`로 성공을, error 문자열로 실패를 보고한다. 결과 전송 실패 시 재전송하며 서버는 동일 서버 토큰의 결과만 반영한다. 에이전트 재시작으로 미보고 결과가 소실될 경우 재실행 또는 만료 상태가 될 수 있다.
 
 세션 조회는 `can_terminate`(0/1), `termination_status`(null/pending/succeeded/failed/expired), `termination_error`를 포함한다. 요청 접수만으로 종료 상태를 변경하지 않는다. 성공 보고 시 ended에는 서버가 결과를 받은 시각을 기록한다. 만료는 실행 성공 여부를 확인하지 못한 상태이므로 세션 상태도 함께 확인해야 한다. 스키마 4에 요청자·대상·시각·결과를 저장하고 보관 기간에 따라 정리한다.
+
+
+## 서버 접근 권한 (스키마 5)
+
+`PUT /api/admins/{username}/access`는 super admin 전용이며 `{"role":"admin","server_ids":["server-id"]}`로 역할과 전체 배정 목록을 원자적으로 교체한다. 역할은 `admin` 또는 `super_admin`, 서버는 폐기되지 않은 등록 서버여야 한다. 마지막 super admin 강등과 잘못된 대상은 400, 일반 관리자 요청은 403이다. 미배정 계정은 모든 서버 목록·로그·집계에서 빈 결과를 받는다. 직접 서버 ID를 지정해도 우회할 수 없다. 서버별 제어·방화벽 API에서 미배정·폐기·없는 서버는 404다.
+
+서버 생성·토큰 재발급·폐기·보관 설정 API는 super admin 전용이다. 일반 관리자는 배정 서버의 IP 차단·해제 및 세션 종료를 요청할 수 있다. 로그인 세션의 현재 역할을 매 요청 확인하므로 재로그인 없이 변경된다. 기존 계정은 migration에서 super admin으로 이전하고, 새로 생성된 계정은 배정 없는 일반 관리자다.
+
+## 방화벽 정책과 이력
+
+| API | 동작 |
+| --- | --- |
+| `GET /api/servers/{id}/firewall?page=0` | `policy`, `state` 배열(최대 1개), `history` 배열(최대 51개) 반환. 이력은 50개 단위 페이지 |
+| `POST /api/servers/{id}/bans` | `{"ip":"203.0.113.10","disconnect":false}`. 같은 IP는 옵션을 갱신. 성공 202 |
+| `DELETE /api/servers/{id}/bans/{ip}` | 정책에서 IP 제거. 이미 없더라도 멱등적으로 제거. IPv6 경로는 URL 인코딩. 성공 202 |
+| `PUT /api/servers/{id}/firewall/settings` | Super admin 전용. `{"ports":[22,2222],"protected":["203.0.113.1"]}`. 성공 202 |
+
+변경 응답은 `{"revision":"...","status":"pending"}`이다. 정책은 `revision`, `ports`, `protected`, `bans`로 구성된다. IP는 단일 주소만 허용하고 IPv4-mapped IPv6를 정규화하며 보호·루프백·멀티캐스트·미지정 주소와 잘못된 포트는 400이다. 보호 목록과 현재 차단 목록이 겹치는 설정도 거부한다. `disconnect=false`는 SSH SYN 시작 패킷, true는 해당 포트의 모든 입력 TCP 패킷을 차단한다.
+
+수집 배치에 `can_firewall:true`와 선택적인 `firewall_result:{"revision":"...","error":""}`를 추가하면 응답의 `firewall` 필드로 전체 정책을 받는다. 에이전트는 로컬에 저장하고 적용한 뒤 다음 배치에서 결과를 보고한다. 다른 서버·이전 revision의 결과는 현재 정책을 완료 처리하지 않는다. 재전송과 재시작 복구를 위해 정책은 매번 전달된다. 구버전 에이전트는 방화벽 필드를 생략하고 계속 수집할 수 있다.
+
+`state`에는 `capable`, `applied_revision`, `error`, `reported`가 있다. 최신 서버 heartbeat가 60초 이내이고 capable=1이며 현재 revision과 applied_revision이 일치하고 error가 비었을 때 적용 완료로 표시한다. 연결이 끊기면 마지막 보고가 성공이어도 현재 상태는 확인 불가다. 이력 상태는 `pending`, `succeeded`, `failed`, `superseded`이고 요청자와 시각을 저장한다. 활성 차단 또는 적용되지 않은 변경이 남은 서버의 폐기는 409다.

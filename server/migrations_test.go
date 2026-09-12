@@ -135,3 +135,35 @@ func TestVersionTwoMigrationInvalidatesUnownedSessions(t *testing.T) {
 		migrated.db.Close()
 	}
 }
+
+func TestVersionFourGrantsExistingAdminsAndPreservesAssignments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v4.db")
+	s, err := openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.db.Exec(`DROP TABLE admin_servers;DROP TABLE admin_roles;DROP TABLE firewall_history;DROP TABLE firewall_policies;
+ INSERT INTO admins VALUES('existing','hash');UPDATE schema_version SET version=4;`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.db.Close()
+	s, err = openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.db.Close()
+	var role string
+	if err = s.db.QueryRow("SELECT role FROM admin_roles WHERE username='existing'").Scan(&role); err != nil || role != "super_admin" {
+		t.Fatal(role, err)
+	}
+	if _, err = s.db.Exec("INSERT INTO admins VALUES('new','hash');INSERT INTO admin_roles VALUES('new','admin')"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.migrate(); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.db.QueryRow("SELECT role FROM admin_roles WHERE username='new'").Scan(&role); err != nil || role != "admin" {
+		t.Fatal("repeat migration promoted restricted admin", role, err)
+	}
+}

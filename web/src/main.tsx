@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
+import { Firewall } from "./Firewall";
 import { AccountSettings } from "./AccountSettings";
 import {
   ActivityControls,
@@ -11,7 +12,13 @@ import {
 
 type Row = Record<string, any>;
 type View =
-  "overview" | "sessions" | "events" | "servers" | "settings" | "accounts";
+  | "overview"
+  | "sessions"
+  | "events"
+  | "servers"
+  | "settings"
+  | "accounts"
+  | "firewall";
 const labels: Record<string, string> = {
   overview: "전체 현황",
   sessions: "접속 세션",
@@ -19,6 +26,7 @@ const labels: Record<string, string> = {
   servers: "서버 관리",
   settings: "보관 설정",
   accounts: "관리자 계정",
+  firewall: "IP 차단",
   session_start: "세션 시작",
   session_end: "세션 종료",
   login_success: "인증 성공",
@@ -62,6 +70,13 @@ async function api(path: string, method = "GET", body?: unknown) {
   return data;
 }
 function App() {
+  const [role, setRole] = useState("admin");
+  const [banTarget, setBanTarget] = useState<{ server: string; ip: string }>();
+  function openBan(server: string, ip: string) {
+    setBanTarget({ server, ip });
+    navigate("firewall");
+    setSelected(null);
+  }
   const [activityMode, setActivityMode] = useState<ActivityMode>("important");
   const [activitySummary, setActivitySummary] =
     useState<ActivitySummary | null>(null);
@@ -97,17 +112,33 @@ function App() {
     [retention, setRetention] = useState(30),
     [notice, setNotice] = useState(""),
     [loading, setLoading] = useState(true);
+  function clearWorkspace() {
+    setServers([]);
+    setRows([]);
+    setSessions([]);
+    setStats({});
+    setSelected(null);
+    setDetail([]);
+    setCredential(null);
+    setBanTarget(undefined);
+    setServer("");
+    setAccount("");
+    setIP("");
+    setQuery("");
+    setRole("admin");
+  }
   useEffect(() => {
     api("/me")
       .then((x) => {
         csrf = x.csrf;
         setUser(x.username);
+        setRole(x.role || "admin");
         setAuth(true);
       })
       .catch(() => setAuth(false));
     const f = () => {
       setAuth(false);
-      setCredential(null);
+      clearWorkspace();
       csrf = "";
     };
     window.addEventListener("auth-expired", f);
@@ -145,7 +176,8 @@ function App() {
           )
         : Promise.resolve([]),
     ]);
-    return { ss, overview, ev, se };
+    const me = await api("/me");
+    return { ss, overview, ev, se, me };
   }, [view, server, account, ip, query, kind, days, page, activityMode]);
   useEffect(() => {
     if (!auth) return;
@@ -157,6 +189,18 @@ function App() {
         const x = await load();
         if (alive) {
           setServers(x.ss);
+          setSelected((current) =>
+            current && x.ss.some((s: Row) => s.id === current.server_id)
+              ? current
+              : null,
+          );
+          if (x.me.role !== "super_admin") setCredential(null);
+          setRole(x.me.role);
+          if (
+            x.me.role !== "super_admin" &&
+            ["servers", "settings"].includes(view)
+          )
+            setView("overview");
           setStats(x.overview[0] || {});
           setRows(x.ev.items || []);
           setActivitySummary(x.ev.items ? x.ev : null);
@@ -230,9 +274,13 @@ function App() {
     setBusy(true);
     setError("");
     try {
-      const x = await api("/login", "POST", { username: user, password });
+      await api("/login", "POST", { username: user, password });
+      const x = await api("/me");
       csrf = x.csrf;
       setUser(x.username);
+      setRole(x.role || "admin");
+      if (x.role !== "super_admin" && ["servers", "settings"].includes(view))
+        setView("overview");
       setPassword("");
       setNotice("");
       setAuth(true);
@@ -344,7 +392,14 @@ function App() {
                   </>
                 )}
               </td>
-              <td>{r.ip || "—"}</td>
+              <td>
+                {r.ip || "—"}
+                {r.ip && (
+                  <button onClick={() => openBan(r.server_id, r.ip)}>
+                    차단
+                  </button>
+                )}
+              </td>
               <td>
                 {r.linked ? (
                   <span className="dot-label">연결됨</span>
@@ -417,6 +472,11 @@ function App() {
               <td>
                 {s.user || "알 수 없음"}
                 <small>{s.ip || "IP 없음"}</small>
+                {s.ip && (
+                  <button onClick={() => openBan(s.server_id, s.ip)}>
+                    IP 차단
+                  </button>
+                )}
               </td>
               <td className="time">{fmt(s.started)}</td>
               <td className="time">{fmt(s.ended)}</td>
@@ -563,19 +623,25 @@ function App() {
               "servers",
               "settings",
               "accounts",
+              "firewall",
             ] as View[]
-          ).map((v, i) => (
-            <button
-              key={v}
-              className={view === v ? "selected" : ""}
-              onClick={() => navigate(v)}
-            >
-              <span aria-hidden="true">
-                {["◫", "⇄", "≡", "▤", "⚙", "♙"][i]}
-              </span>
-              {labels[v]}
-            </button>
-          ))}
+          )
+            .filter(
+              (v) =>
+                role === "super_admin" || !["servers", "settings"].includes(v),
+            )
+            .map((v, i) => (
+              <button
+                key={v}
+                className={view === v ? "selected" : ""}
+                onClick={() => navigate(v)}
+              >
+                <span aria-hidden="true">
+                  {["◫", "⇄", "≡", "▤", "⚙", "♙"][i]}
+                </span>
+                {labels[v]}
+              </button>
+            ))}
         </nav>
         <div className="sidebar-bottom">
           <span className="dot-label">중앙 로그 관리</span>
@@ -586,7 +652,7 @@ function App() {
                 await api("/logout", "POST");
                 csrf = "";
                 setAuth(false);
-                setCredential(null);
+                clearWorkspace();
               })
             }
           >
@@ -826,7 +892,7 @@ function App() {
               </div>
             </section>
           )}
-          {view === "servers" && (
+          {view === "servers" && role === "super_admin" && (
             <>
               <section className="panel">
                 <div className="panel-head">
@@ -1016,14 +1082,24 @@ function App() {
               </section>
             </>
           )}
+          {view === "firewall" && (
+            <Firewall
+              api={api}
+              servers={servers}
+              superAdmin={role === "super_admin"}
+              initial={banTarget}
+            />
+          )}
           {view === "accounts" && (
             <AccountSettings
               username={user}
+              superAdmin={role === "super_admin"}
+              servers={servers}
               api={api}
               onPasswordChanged={() => {
                 csrf = "";
                 setAuth(false);
-                setCredential(null);
+                clearWorkspace();
                 setPassword("");
                 setError("");
                 setNotice(
@@ -1032,7 +1108,7 @@ function App() {
               }}
             />
           )}
-          {view === "settings" && (
+          {view === "settings" && role === "super_admin" && (
             <section className="panel settings">
               <h2>기록 보관 기간</h2>
               <p>

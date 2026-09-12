@@ -38,7 +38,7 @@ func openSpool(path string, limit int64) (*spool, error) {
 		return nil, e
 	}
 	db.SetMaxOpenConns(1)
-	if _, e = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS checkpoint(id INTEGER PRIMARY KEY,data TEXT NOT NULL);CREATE TABLE IF NOT EXISTS queue(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`); e != nil {
+	if _, e = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS checkpoint(id INTEGER PRIMARY KEY,data TEXT NOT NULL);CREATE TABLE IF NOT EXISTS queue(id TEXT PRIMARY KEY,payload TEXT NOT NULL);CREATE TABLE IF NOT EXISTS firewall_cache(id INTEGER PRIMARY KEY CHECK(id=1),policy TEXT NOT NULL);`); e != nil {
 		db.Close()
 		return nil, e
 	}

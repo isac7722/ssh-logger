@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"golang.org/x/crypto/bcrypt"
@@ -88,7 +89,13 @@ func main() {
 		if e != nil {
 			log.Fatal(e)
 		}
-		if _, e = s.db.Exec("INSERT INTO admins VALUES(?,?)", env("ADMIN_USER", "admin"), string(h)); e != nil {
+		if e = s.transaction(context.Background(), func(tx *sql.Tx) error {
+			if _, err := tx.Exec("INSERT INTO admins VALUES(?,?)", env("ADMIN_USER", "admin"), string(h)); err != nil {
+				return err
+			}
+			_, err := tx.Exec("INSERT INTO admin_roles VALUES(?,'super_admin')", env("ADMIN_USER", "admin"))
+			return err
+		}); e != nil {
 			log.Fatal(e)
 		}
 	}

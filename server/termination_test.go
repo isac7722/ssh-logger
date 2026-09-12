@@ -120,7 +120,7 @@ func TestTerminationExpiryAndOfflineServer(t *testing.T) {
 		t.Fatal(w.Code)
 	}
 	a.store.db.Exec("UPDATE servers SET last_seen=?,revoked=1", now)
-	if w := request(h, "POST", path, nil, cookie, csrf, ""); w.Code != 409 {
+	if w := request(h, "POST", path, nil, cookie, csrf, ""); w.Code != 404 {
 		t.Fatal(w.Code)
 	}
 }

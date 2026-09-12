@@ -31,10 +31,13 @@ type TerminationResult struct {
 	Error string `json:"error"`
 }
 type IngestResponse struct {
-	Accepted     int           `json:"accepted"`
-	Terminations []Termination `json:"terminations,omitempty"`
+	Firewall     *FirewallPolicy `json:"firewall,omitempty"`
+	Accepted     int             `json:"accepted"`
+	Terminations []Termination   `json:"terminations,omitempty"`
 }
 type Batch struct {
+	CanFirewall        bool                `json:"can_firewall,omitempty"`
+	FirewallResult     *FirewallResult     `json:"firewall_result,omitempty"`
 	CanTerminate       bool                `json:"can_terminate,omitempty"`
 	TerminationResults []TerminationResult `json:"termination_results,omitempty"`
 	Events             []Event             `json:"events"`

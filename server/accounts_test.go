@@ -62,10 +62,10 @@ func TestAdminAccountsAndPasswordChange(t *testing.T) {
 		t.Fatal(session, err)
 	}
 	w = request(h, "GET", "/api/admins", nil, operatorCookie, "", "")
-	if w.Code != 200 || strings.Contains(w.Body.String(), "password") || !strings.Contains(w.Body.String(), "operator") {
+	if w.Code != 403 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if w = request(h, "POST", "/api/admins", map[string]string{"username": "third", "password": "third-password-123"}, operatorCookie, session["csrf"], ""); w.Code != 201 {
+	if w = request(h, "POST", "/api/admins", map[string]string{"username": "third", "password": "third-password-123"}, operatorCookie, session["csrf"], ""); w.Code != 403 {
 		t.Fatalf("additional admin permissions: %d", w.Code)
 	}
 	change := map[string]string{"current_password": "wrong", "new_password": "changed-password-123"}

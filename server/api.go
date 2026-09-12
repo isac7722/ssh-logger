@@ -65,22 +65,27 @@ func (a *App) routes() http.Handler {
 			fail(w, 401, "로그인이 필요합니다.")
 			return
 		}
-		reply(w, 200, map[string]string{"csrf": csrf, "username": username})
+		reply(w, 200, map[string]string{"csrf": csrf, "username": username, "role": identity(r).Role})
 	}))
 	m.HandleFunc("POST /api/logout", a.auth(a.logout))
 	m.HandleFunc("PUT /api/me/password", a.auth(a.changePassword))
-	m.HandleFunc("GET /api/admins", a.auth(a.admins))
-	m.HandleFunc("POST /api/admins", a.auth(a.createAdmin))
+	m.HandleFunc("GET /api/admins", a.auth(a.super(a.admins)))
+	m.HandleFunc("POST /api/admins", a.auth(a.super(a.createAdmin)))
 	m.HandleFunc("GET /api/servers", a.auth(a.servers))
-	m.HandleFunc("POST /api/servers", a.auth(a.createServer))
-	m.HandleFunc("POST /api/servers/{id}/rotate", a.auth(a.rotate))
-	m.HandleFunc("POST /api/servers/{id}/revoke", a.auth(a.revoke))
+	m.HandleFunc("POST /api/servers", a.auth(a.super(a.createServer)))
+	m.HandleFunc("POST /api/servers/{id}/rotate", a.auth(a.super(a.rotate)))
+	m.HandleFunc("POST /api/servers/{id}/revoke", a.auth(a.super(a.revoke)))
 	m.HandleFunc("GET /api/events", a.auth(a.events))
 	m.HandleFunc("GET /api/sessions", a.auth(a.sessions))
-	m.HandleFunc("POST /api/servers/{id}/sessions/{session}/terminate", a.auth(a.terminateSession))
+	m.HandleFunc("POST /api/servers/{id}/sessions/{session}/terminate", a.auth(a.assigned(a.terminateSession)))
+	m.HandleFunc("PUT /api/admins/{username}/access", a.auth(a.super(a.updateAdminAccess)))
+	m.HandleFunc("GET /api/servers/{id}/firewall", a.auth(a.assigned(a.firewall)))
+	m.HandleFunc("PUT /api/servers/{id}/firewall/settings", a.auth(a.super(a.assigned(a.firewallSettings))))
+	m.HandleFunc("POST /api/servers/{id}/bans", a.auth(a.assigned(a.banIP)))
+	m.HandleFunc("DELETE /api/servers/{id}/bans/{ip}", a.auth(a.assigned(a.unbanIP)))
 	m.HandleFunc("GET /api/overview", a.auth(a.overview))
-	m.HandleFunc("GET /api/settings", a.auth(a.settings))
-	m.HandleFunc("PUT /api/settings", a.auth(a.saveSettings))
+	m.HandleFunc("GET /api/settings", a.auth(a.super(a.settings)))
+	m.HandleFunc("PUT /api/settings", a.auth(a.super(a.saveSettings)))
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "API 경로를 찾을 수 없습니다.") })
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" && r.Method != "HEAD" {
@@ -121,7 +126,8 @@ func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		var csrf string
-		e = a.store.db.QueryRowContext(r.Context(), "SELECT csrf FROM auth_sessions WHERE token_hash=? AND expires>?", hash(c.Value), time.Now().UnixMilli()).Scan(&csrf)
+		var p principal
+		e = a.store.db.QueryRowContext(r.Context(), "SELECT s.csrf,s.username,COALESCE(a.role,'admin') FROM auth_sessions s LEFT JOIN admin_roles a ON a.username=s.username WHERE s.token_hash=? AND s.expires>?", hash(c.Value), time.Now().UnixMilli()).Scan(&csrf, &p.Username, &p.Role)
 		if e != nil {
 			fail(w, 401, "로그인이 만료되었습니다.")
 			return
@@ -130,7 +136,7 @@ func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 			fail(w, 403, "요청 출처 또는 CSRF 토큰이 올바르지 않습니다.")
 			return
 		}
-		next(w, r)
+		next(w, withIdentity(r, p))
 	}
 }
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
@@ -231,7 +237,7 @@ func (a *App) query(w http.ResponseWriter, r *http.Request, q string, args ...an
 	reply(w, 200, v)
 }
 func (a *App) servers(w http.ResponseWriter, r *http.Request) {
-	a.query(w, r, "SELECT id,name,created,last_seen,health,backlog,dropped,revoked FROM servers WHERE revoked=0 ORDER BY name")
+	a.query(w, r, "SELECT id,name,created,last_seen,health,backlog,dropped,revoked FROM servers WHERE revoked=0 AND "+scope(r, "id")+" ORDER BY name")
 }
 func (a *App) createServer(w http.ResponseWriter, r *http.Request) {
 	var b struct {
@@ -261,7 +267,17 @@ func (a *App) revoke(w http.ResponseWriter, r *http.Request) { a.changeToken(w, 
 func (a *App) changeToken(w http.ResponseWriter, r *http.Request, revoke bool) {
 	token := model.ID()
 	var count int64
+	pendingFirewall := errors.New("pending firewall")
 	e := a.store.transaction(r.Context(), func(tx *sql.Tx) error {
+		if revoke {
+			var pending int
+			if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM firewall_policies WHERE server_id=? AND (json_array_length(policy,'$.bans')>0 OR (revision!=applied_revision AND EXISTS(SELECT 1 FROM firewall_history WHERE server_id=?)))`, r.PathValue("id"), r.PathValue("id")).Scan(&pending); err != nil {
+				return err
+			}
+			if pending > 0 {
+				return pendingFirewall
+			}
+		}
 		v, e := tx.ExecContext(r.Context(), "UPDATE servers SET token_hash=?,revoked=? WHERE id=? AND revoked=0", hash(token), revoke, r.PathValue("id"))
 		if e != nil {
 			return e
@@ -269,6 +285,10 @@ func (a *App) changeToken(w http.ResponseWriter, r *http.Request, revoke bool) {
 		count, e = v.RowsAffected()
 		return e
 	})
+	if errors.Is(e, pendingFirewall) {
+		fail(w, 409, "IP 차단을 모두 해제하고 에이전트 적용 완료를 확인한 뒤 서버를 폐기하세요.")
+		return
+	}
 	if e != nil {
 		fail(w, 503, "인증 정보 변경에 실패했습니다.")
 		return
@@ -291,6 +311,10 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 	}
 	var b model.Batch
 	if !decode(w, r, &b) {
+		return
+	}
+	if b.FirewallResult != nil && (len(b.FirewallResult.Revision) > 100 || len(b.FirewallResult.Error) > 500) {
+		fail(w, 400, "invalid firewall result")
 		return
 	}
 	if len(b.TerminationResults) > 100 || len(b.Events) > 500 || len(b.ActiveSessions) > 10000 || len(b.Health) > 200 || b.Backlog < 0 || b.Dropped < 0 {
@@ -325,6 +349,7 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var commands []model.Termination
+	var policy *model.FirewallPolicy
 	unauthorized := errors.New("unauthorized")
 	err := a.store.transaction(r.Context(), func(tx *sql.Tx) error {
 		var server string
@@ -336,6 +361,10 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		}
 		var controlErr error
 		commands, controlErr = ingestTerminations(r, tx, server, b, now)
+		if controlErr != nil {
+			return controlErr
+		}
+		policy, controlErr = ingestFirewall(r, tx, server, b, now)
 		if controlErr != nil {
 			return controlErr
 		}
@@ -381,7 +410,7 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "storage unavailable; retry batch")
 		return
 	}
-	reply(w, 200, model.IngestResponse{Accepted: len(b.Events), Terminations: commands})
+	reply(w, 200, model.IngestResponse{Accepted: len(b.Events), Terminations: commands, Firewall: policy})
 }
 func page(r *http.Request) int {
 	p, _ := strconv.Atoi(r.URL.Query().Get("page"))
@@ -448,7 +477,7 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	summary := r.URL.Query().Get("summary") == "1"
-	where += " AND s.revoked=0"
+	where += " AND s.revoked=0 AND " + scope(r, "s.id")
 	from := ` FROM events e JOIN servers s ON s.id=e.server_id LEFT JOIN sessions se ON se.server_id=e.server_id AND se.id=e.session_id`
 	visibleWhere := where
 	if activity == "important" {
@@ -497,7 +526,7 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) sessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	where := " WHERE s.revoked=0"
+	where := " WHERE s.revoked=0 AND " + scope(r, "s.id")
 	args := []any{time.Now().Add(-60 * time.Second).UnixMilli()}
 	for _, key := range []string{"server_id", "user", "ip"} {
 		if v := q.Get(key); v != "" {
@@ -524,7 +553,7 @@ func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 		}
 		start = n
 	}
-	a.query(w, r, `SELECT (SELECT COUNT(*) FROM sessions se JOIN servers s ON s.id=se.server_id WHERE ended IS NULL AND live=1 AND last_seen>? AND s.health='ok' AND revoked=0) AS active,(SELECT COUNT(*) FROM events e JOIN servers s ON s.id=e.server_id WHERE s.revoked=0 AND e.kind='session_start' AND e.time>=?) AS logins,(SELECT COUNT(*) FROM events e JOIN servers s ON s.id=e.server_id WHERE s.revoked=0 AND e.kind='login_failure' AND e.time>=?) AS failures,(SELECT COUNT(*) FROM servers WHERE last_seen>? AND health='ok' AND revoked=0) AS healthy,(SELECT COUNT(*) FROM servers WHERE revoked=0) AS total,(SELECT COUNT(*) FROM sessions se JOIN servers s ON s.id=se.server_id WHERE s.revoked=0 AND ended IS NULL AND (live=0 OR last_seen<=? OR health!='ok')) AS unknown`, now.Add(-60*time.Second).UnixMilli(), start, start, now.Add(-60*time.Second).UnixMilli(), now.Add(-60*time.Second).UnixMilli())
+	a.query(w, r, `WITH visible_servers AS (SELECT * FROM servers WHERE `+scope(r, "id")+`) SELECT (SELECT COUNT(*) FROM sessions se JOIN visible_servers s ON s.id=se.server_id WHERE ended IS NULL AND live=1 AND last_seen>? AND s.health='ok' AND revoked=0) AS active,(SELECT COUNT(*) FROM events e JOIN visible_servers s ON s.id=e.server_id WHERE s.revoked=0 AND e.kind='session_start' AND e.time>=?) AS logins,(SELECT COUNT(*) FROM events e JOIN visible_servers s ON s.id=e.server_id WHERE s.revoked=0 AND e.kind='login_failure' AND e.time>=?) AS failures,(SELECT COUNT(*) FROM visible_servers WHERE last_seen>? AND health='ok' AND revoked=0) AS healthy,(SELECT COUNT(*) FROM visible_servers WHERE revoked=0) AS total,(SELECT COUNT(*) FROM sessions se JOIN visible_servers s ON s.id=se.server_id WHERE s.revoked=0 AND ended IS NULL AND (live=0 OR last_seen<=? OR health!='ok')) AS unknown`, now.Add(-60*time.Second).UnixMilli(), start, start, now.Add(-60*time.Second).UnixMilli(), now.Add(-60*time.Second).UnixMilli())
 }
 func (a *App) settings(w http.ResponseWriter, r *http.Request) {
 	a.query(w, r, "SELECT retention_days FROM settings")

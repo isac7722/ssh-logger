@@ -46,7 +46,7 @@ cleanup() { chmod -R u+w -- "$work"; rm -rf -- "$work"; }
 trap cleanup EXIT
 printf '%s\n' '필수 도구와 auditd를 설치합니다.'
 "${privilege[@]}" apt-get update
-"${privilege[@]}" apt-get install -y --no-install-recommends auditd golang-go curl ca-certificates tar
+"${privilege[@]}" apt-get install -y --no-install-recommends auditd nftables golang-go curl ca-certificates tar
 printf '%s\n' '수집기 소스를 다운로드합니다.'
 curl --fail --show-error --silent --location --proto '=https' --tlsv1.2 \
   "https://codeload.github.com/isac7722/ssh-logger/tar.gz/$ref" -o "$work/source.tar.gz"

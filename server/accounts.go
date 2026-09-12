@@ -16,7 +16,7 @@ var adminUsername = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 func validPassword(password string) bool { return len(password) >= 12 && len(password) <= 72 }
 
 func (a *App) admins(w http.ResponseWriter, r *http.Request) {
-	a.query(w, r, "SELECT username FROM admins ORDER BY username")
+	a.query(w, r, "SELECT a.username,COALESCE(r.role,'admin') AS role,COALESCE((SELECT json_group_array(server_id) FROM admin_servers WHERE username=a.username),'[]') AS server_ids FROM admins a LEFT JOIN admin_roles r ON r.username=a.username ORDER BY a.username")
 }
 
 func (a *App) createAdmin(w http.ResponseWriter, r *http.Request) {

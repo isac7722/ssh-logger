@@ -806,3 +806,8 @@ footer span {
 .account-settings td {
   overflow-wrap: anywhere;
 }
+
+.check-label { display: flex; align-items: center; gap: .6rem; }
+.check-label input { width: auto; }
+textarea { width: 100%; padding: .7rem; font: inherit; }
+fieldset { border: 1px solid #d9e0e8; margin: .7rem 0; padding: .8rem; }

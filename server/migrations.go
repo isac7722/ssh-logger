@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-const currentSchemaVersion = 4
+const currentSchemaVersion = 5
 
 func (s *Store) migrate() error {
 	tx, err := s.db.Begin()
@@ -49,6 +49,21 @@ func (s *Store) migrate() error {
 			"CREATE TABLE IF NOT EXISTS session_terminations(id TEXT PRIMARY KEY,server_id TEXT NOT NULL REFERENCES servers(id),session_id TEXT NOT NULL,requested_by TEXT NOT NULL,created INTEGER NOT NULL,expires INTEGER NOT NULL,status TEXT NOT NULL,error TEXT NOT NULL DEFAULT '')",
 			"CREATE INDEX IF NOT EXISTS termination_session ON session_terminations(server_id,session_id,created DESC)",
 			"UPDATE schema_version SET version=4",
+		} {
+			if _, err = tx.Exec(q); err != nil {
+				return err
+			}
+		}
+	}
+	if version < 5 {
+		for _, q := range []string{
+			"CREATE TABLE IF NOT EXISTS admin_roles(username TEXT PRIMARY KEY REFERENCES admins(username),role TEXT NOT NULL CHECK(role IN ('super_admin','admin')))",
+			"INSERT OR IGNORE INTO admin_roles SELECT username,'super_admin' FROM admins",
+			"CREATE TABLE IF NOT EXISTS admin_servers(username TEXT NOT NULL REFERENCES admins(username),server_id TEXT NOT NULL REFERENCES servers(id),PRIMARY KEY(username,server_id))",
+			"CREATE TABLE IF NOT EXISTS firewall_policies(server_id TEXT PRIMARY KEY REFERENCES servers(id),revision TEXT NOT NULL,policy TEXT NOT NULL,applied_revision TEXT NOT NULL DEFAULT '',error TEXT NOT NULL DEFAULT '',reported INTEGER NOT NULL DEFAULT 0,capable INTEGER NOT NULL DEFAULT 0)",
+			"CREATE TABLE IF NOT EXISTS firewall_history(id TEXT PRIMARY KEY,server_id TEXT NOT NULL REFERENCES servers(id),revision TEXT NOT NULL,ip TEXT NOT NULL,action TEXT NOT NULL,requested_by TEXT NOT NULL,created INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending',error TEXT NOT NULL DEFAULT '')",
+			"CREATE INDEX IF NOT EXISTS firewall_history_server ON firewall_history(server_id,created DESC)",
+			"UPDATE schema_version SET version=5",
 		} {
 			if _, err = tx.Exec(q); err != nil {
 				return err

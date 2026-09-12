@@ -24,7 +24,7 @@ func fixture(t *testing.T) (*App, http.Handler) {
 	}
 	t.Cleanup(func() { s.db.Close() })
 	h, _ := bcrypt.GenerateFromPassword([]byte("long-test-password"), bcrypt.MinCost)
-	if _, e = s.db.Exec("INSERT INTO admins VALUES('admin',?)", string(h)); e != nil {
+	if _, e = s.db.Exec("INSERT INTO admins VALUES('admin',?); INSERT INTO admin_roles VALUES('admin','super_admin')", string(h)); e != nil {
 		t.Fatal(e)
 	}
 	a := &App{store: s, origin: "http://localhost:8080"}
