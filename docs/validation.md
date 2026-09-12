@@ -149,3 +149,11 @@ docker run --rm --cap-add NET_ADMIN -e SSHLOGGER_FIREWALL_TEST=disposable \
   -v sshlogger-gomod:/go/pkg/mod -v sshlogger-gocache:/root/.cache/go-build \
   golang:1.26-alpine sh -c 'apk add --no-cache nftables iproute2 && go test ./agent -run TestAllowlistKernel -v'
 ```
+
+## 로그인 화면 개선 검증 (2026-09-13)
+
+- 대시보드와 같은 밝은 배경·색상으로 로그인 화면을 정리하고 브랜드, 제목, 입력 폼, 계정 문의 안내를 분리했다. 첫 방문의 고정 `admin` 입력을 제거하고 비밀번호 표시·숨기기와 자동 완성을 지원한다.
+- 로그인 상태 확인 및 제출 중 진행 표시, 제출 중 입력·중복 제출 방지, 실패 시 입력 보존과 오류 안내 초점을 확인했다. 인증 API와 에이전트는 변경하지 않았다.
+- TypeScript 검사와 프로덕션 웹 빌드, Chromium 브라우저 테스트 7개 통과. 데스크톱 중앙 정렬 보정 후 로그인 테스트를 추가 재실행하여 통과했다.
+- 1440px 데스크톱, 375px 모바일, 812×375 가로 화면 캡처를 검토했다. 글자 크기 200% 확대 시 가로 넘침, 동작 감소 설정, Tab·Space·Enter 키 조작, 오류 후 재로그인과 로그아웃 시 비밀번호 초기화도 검증했다.
+- 검증은 로컬 테스트 컨테이너와 합성 데이터로 수행했다. 로그인 오류·지연 응답은 모의 응답을 사용하고, 로그인 성공 및 기존 관리 기능은 실제 테스트 API로 확인했다.

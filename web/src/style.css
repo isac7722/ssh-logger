@@ -515,41 +515,163 @@ footer span {
   letter-spacing: 0;
   font-size: 10px;
 }
+/* Login shares the console palette while keeping one clear primary action. */
 .login-shell {
+  margin: 0;
+  width: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  background: var(--canvas);
+  padding: 48px 24px;
+}
+.login-layout {
+  width: min(100%, 440px);
+}
+.login-brand {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 32px;
+  color: var(--text);
+  font-size: 1.428571rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+.login-brand .logo-mark {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 12px;
+}
+.login-brand small {
+  margin-top: 2px;
+  font-size: 0.857143rem;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 36px;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px #202b3805;
+}
+.login-heading {
+  margin-bottom: 28px;
+}
+.login-heading-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+.login-heading h1 {
+  font-size: 1.857143rem;
+  letter-spacing: -0.8px;
+  line-height: 1.4;
+  margin-bottom: 8px;
+  word-break: keep-all;
+}
+.login-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  gap: 20px;
+}
+.login-fields label {
+  color: var(--text);
+  font-size: 0.928571rem;
+}
+.login-fields input {
+  min-height: 48px;
+  font-size: 1.142857rem;
+}
+.login-fields input::placeholder {
+  font-size: 1rem;
+}
+.login-fields .password-input button {
+  top: 2px;
+  min-height: 44px;
+}
+.login-fields:disabled {
+  opacity: 0.65;
+}
+.login-submit {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(ellipse at 20% 20%, #20394a 0%, #0f1929 65%);
-  padding: 24px;
+  gap: 10px;
 }
-.login-card {
-  background: #fff;
-  padding: 40px;
-  border-radius: 16px;
-  width: 420px;
-  box-shadow: 0 24px 80px #0003;
-}
-.login-card .logo-mark {
-  margin-bottom: 28px;
-}
-.login-card h1 {
-  margin-bottom: 12px;
-}
-.login-card p {
-  margin-bottom: 28px;
-}
-.login-card label {
-  margin-bottom: 18px;
-}
-.login-card button {
-  width: 100%;
-  padding: 12px;
-  margin-top: 8px;
-}
-.login-card > small {
+.login-card .login-help {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  font-size: 0.857143rem;
+  line-height: 1.7;
   text-align: center;
-  margin-top: 20px;
+  word-break: keep-all;
+}
+.login-caption {
+  text-align: center;
+  font-size: 0.857143rem;
+  margin-top: 24px;
+}
+.login-card .login-error {
+  margin: 20px 0 0;
+  font-size: 0.928571rem;
+  overflow-wrap: anywhere;
+}
+.login-error:focus {
+  outline: 2px solid var(--danger);
+  outline-offset: 3px;
+}
+.login-checking {
+  min-height: 268px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--secondary);
+}
+.login-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: login-spin 800ms linear infinite;
+}
+@keyframes login-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 480px) {
+  .login-shell {
+    padding: 32px 20px;
+  }
+  .login-card {
+    padding: 28px 24px;
+  }
+  .login-brand {
+    margin-bottom: 24px;
+  }
+  .login-heading h1 {
+    font-size: 1.714286rem;
+  }
 }
 .modal-backdrop {
   position: fixed;

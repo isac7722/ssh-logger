@@ -4,6 +4,7 @@ import "./style.css";
 import { Firewall } from "./Firewall";
 import { AccountSettings } from "./AccountSettings";
 import { Icon } from "./UI";
+import { Login } from "./Login";
 import {
   ActivityControls,
   CommandText,
@@ -90,7 +91,7 @@ function App() {
   );
   const [detailLoading, setDetailLoading] = useState(false);
   const [auth, setAuth] = useState<boolean | null>(null),
-    [user, setUser] = useState("admin"),
+    [user, setUser] = useState(""),
     [password, setPassword] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -559,54 +560,19 @@ function App() {
       )}
     </div>
   );
-  if (auth === null)
-    return <div className="login-shell">로그인 상태 확인 중…</div>;
   if (!auth)
     return (
-      <div className="login-shell">
-        <form className="login-card" onSubmit={login}>
-          <div className="logo-mark">&gt;_</div>
-          <div className="eyebrow">SERVER ACTIVITY MONITOR</div>
-          <h1>SSH Logger</h1>
-          <p>
-            서버에 접속한 사람과
-            <br />그 순간의 활동을 한곳에서.
-          </p>
-          {notice && (
-            <div className="notice" role="status">
-              {notice}
-            </div>
-          )}
-          {error && (
-            <div className="alert" role="alert">
-              {error}
-            </div>
-          )}
-          <label>
-            관리자 계정
-            <input
-              autoComplete="username"
-              value={user}
-              onChange={(e) => setUser(e.target.value)}
-              required
-            />
-          </label>
-          <label>
-            비밀번호
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </label>
-          <button className="primary" disabled={busy}>
-            {busy ? "로그인 중…" : "대시보드 로그인 →"}
-          </button>
-          <small>설치 시 설정한 관리자 계정으로 로그인하세요.</small>
-        </form>
-      </div>
+      <Login
+        username={user}
+        password={password}
+        onUsernameChange={setUser}
+        onPasswordChange={setPassword}
+        onSubmit={login}
+        busy={busy}
+        checking={auth === null}
+        error={error}
+        notice={notice}
+      />
     );
   return (
     <div className="app">
