@@ -27,6 +27,19 @@ func firewallScript(p model.FirewallPolicy) (string, error) {
 	}
 	var out strings.Builder
 	out.WriteString("add table inet ssh_logger\ndelete table inet ssh_logger\nadd table inet ssh_logger\nadd chain inet ssh_logger input { type filter hook input priority -10; policy accept; }\n")
+	if p.Mode == "allowlist" {
+		// Filter only connection-opening SYN packets. Existing flows may predate
+		// conntrack activation, so ct state established alone cannot preserve them.
+		for _, ip := range p.Allowed {
+			family := "ip"
+			if strings.Contains(ip, ":") {
+				family = "ip6"
+			}
+			fmt.Fprintf(&out, "add rule inet ssh_logger input %s saddr %s tcp dport { %s } accept\n", family, ip, strings.Join(ports, ", "))
+		}
+		fmt.Fprintf(&out, "add rule inet ssh_logger input tcp dport { %s } tcp flags & (syn | ack) == syn drop\n", strings.Join(ports, ", "))
+		return out.String(), nil
+	}
 	for _, b := range p.Bans {
 		family := "ip"
 		if strings.Contains(b.IP, ":") {

@@ -27,7 +27,7 @@ const labels: Record<string, string> = {
   servers: "서버 관리",
   settings: "보관 설정",
   accounts: "관리자 계정",
-  firewall: "IP 차단",
+  firewall: "SSH 접근 제어",
   session_start: "세션 시작",
   session_end: "세션 종료",
   login_success: "인증 성공",
@@ -72,9 +72,12 @@ async function api(path: string, method = "GET", body?: unknown) {
 }
 function App() {
   const [role, setRole] = useState("admin");
-  const [banTarget, setBanTarget] = useState<{ server: string; ip: string }>();
-  function openBan(server: string, ip: string) {
-    setBanTarget({ server, ip });
+  const [accessTarget, setAccessTarget] = useState<{
+    server: string;
+    ip: string;
+  }>();
+  function openAccess(server: string, ip: string) {
+    setAccessTarget({ server, ip });
     navigate("firewall");
     setSelected(null);
   }
@@ -121,7 +124,7 @@ function App() {
     setSelected(null);
     setDetail([]);
     setCredential(null);
-    setBanTarget(undefined);
+    setAccessTarget(undefined);
     setServer("");
     setAccount("");
     setIP("");
@@ -396,8 +399,8 @@ function App() {
               <td>
                 {r.ip || "—"}
                 {r.ip && (
-                  <button onClick={() => openBan(r.server_id, r.ip)}>
-                    차단
+                  <button onClick={() => openAccess(r.server_id, r.ip)}>
+                    IP 허용
                   </button>
                 )}
               </td>
@@ -474,8 +477,8 @@ function App() {
                 {s.user || "알 수 없음"}
                 <small>{s.ip || "IP 없음"}</small>
                 {s.ip && (
-                  <button onClick={() => openBan(s.server_id, s.ip)}>
-                    IP 차단
+                  <button onClick={() => openAccess(s.server_id, s.ip)}>
+                    IP 허용
                   </button>
                 )}
               </td>
@@ -1085,7 +1088,7 @@ function App() {
               api={api}
               servers={servers}
               superAdmin={role === "super_admin"}
-              initial={banTarget}
+              initial={accessTarget}
             />
           )}
           {view === "accounts" && (

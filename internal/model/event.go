@@ -37,6 +37,7 @@ type IngestResponse struct {
 }
 type Batch struct {
 	CanFirewall        bool                `json:"can_firewall,omitempty"`
+	CanAllowlist       bool                `json:"can_allowlist,omitempty"`
 	FirewallResult     *FirewallResult     `json:"firewall_result,omitempty"`
 	CanTerminate       bool                `json:"can_terminate,omitempty"`
 	TerminationResults []TerminationResult `json:"termination_results,omitempty"`

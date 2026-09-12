@@ -101,19 +101,23 @@ kind는 `login_success`, `login_failure`, `session_start`, `session_end`, `exec`
 
 `PUT /api/admins/{username}/access`는 super admin 전용이며 `{"role":"admin","server_ids":["server-id"]}`로 역할과 전체 배정 목록을 원자적으로 교체한다. 역할은 `admin` 또는 `super_admin`, 서버는 폐기되지 않은 등록 서버여야 한다. 마지막 super admin 강등과 잘못된 대상은 400, 일반 관리자 요청은 403이다. 미배정 계정은 모든 서버 목록·로그·집계에서 빈 결과를 받는다. 직접 서버 ID를 지정해도 우회할 수 없다. 서버별 제어·방화벽 API에서 미배정·폐기·없는 서버는 404다.
 
-서버 생성·토큰 재발급·폐기·보관 설정 API는 super admin 전용이다. 일반 관리자는 배정 서버의 IP 차단·해제 및 세션 종료를 요청할 수 있다. 로그인 세션의 현재 역할을 매 요청 확인하므로 재로그인 없이 변경된다. 기존 계정은 migration에서 super admin으로 이전하고, 새로 생성된 계정은 배정 없는 일반 관리자다.
+서버 생성·토큰 재발급·폐기·보관 설정 API는 super admin 전용이다. 일반 관리자는 배정 서버의 허용 IP 추가·삭제 및 세션 종료를 요청할 수 있다. 로그인 세션의 현재 역할을 매 요청 확인하므로 재로그인 없이 변경된다. 기존 계정은 migration에서 super admin으로 이전하고, 새로 생성된 계정은 배정 없는 일반 관리자다.
 
-## 방화벽 정책과 이력
+## SSH 화이트리스트 정책과 이력
 
 | API | 동작 |
 | --- | --- |
 | `GET /api/servers/{id}/firewall?page=0` | `policy`, `state` 배열(최대 1개), `history` 배열(최대 51개) 반환. 이력은 50개 단위 페이지 |
-| `POST /api/servers/{id}/bans` | `{"ip":"203.0.113.10","disconnect":false}`. 같은 IP는 옵션을 갱신. 성공 202 |
-| `DELETE /api/servers/{id}/bans/{ip}` | 정책에서 IP 제거. 이미 없더라도 멱등적으로 제거. IPv6 경로는 URL 인코딩. 성공 202 |
-| `PUT /api/servers/{id}/firewall/settings` | Super admin 전용. `{"ports":[22,2222],"protected":["203.0.113.1"]}`. 성공 202 |
+| `POST /api/servers/{id}/allowlist` | `{"ip":"203.0.113.10"}`. 허용 IP 등록, 중복 등록은 멱등. 성공 202 |
+| `DELETE /api/servers/{id}/allowlist/{ip}` | 허용 IP 제거. 이미 없으면 멱등. 활성화 중 마지막 IP 제거는 400. IPv6 경로는 URL 인코딩 |
+| `PUT /api/servers/{id}/firewall/settings` | 최고 관리자 전용. `{"ports":[22,2222],"mode":"allowlist"}` 또는 `mode:"off"`. 성공 202 |
 
-변경 응답은 `{"revision":"...","status":"pending"}`이다. 정책은 `revision`, `ports`, `protected`, `bans`로 구성된다. IP는 단일 주소만 허용하고 IPv4-mapped IPv6를 정규화하며 보호·루프백·멀티캐스트·미지정 주소와 잘못된 포트는 400이다. 보호 목록과 현재 차단 목록이 겹치는 설정도 거부한다. `disconnect=false`는 SSH SYN 시작 패킷, true는 해당 포트의 모든 입력 TCP 패킷을 차단한다.
+변경 응답은 `{"revision":"...","status":"pending"}`이다. 정책은 `revision`, `ports`, `mode`, `allowed` 및 이전 버전 호환 필드 `protected`, `bans`로 구성된다. `mode`가 없으면 이전 차단 정책, `allowlist`이면 허용 목록 적용, `off`이면 이 도구의 접근 제한 해제다. `allowed`는 문자열 배열이며 빈 목록은 응답에서 생략될 수 있다. 프론트엔드는 `policy.allowed || []`로 처리한다. IP 추가만으로 모드를 바꾸지 않는다.
 
-수집 배치에 `can_firewall:true`와 선택적인 `firewall_result:{"revision":"...","error":""}`를 추가하면 응답의 `firewall` 필드로 전체 정책을 받는다. 에이전트는 로컬에 저장하고 적용한 뒤 다음 배치에서 결과를 보고한다. 다른 서버·이전 revision의 결과는 현재 정책을 완료 처리하지 않는다. 재전송과 재시작 복구를 위해 정책은 매번 전달된다. 구버전 에이전트는 방화벽 필드를 생략하고 계속 수집할 수 있다.
+화이트리스트 활성화에는 유효한 허용 IP 1개 이상과 수집기의 지원 확인이 필요하다. IP는 최대 1,000개의 단일 IPv4/IPv6 주소이며 IPv4-mapped IPv6를 정규화한다. 잘못된 IP·CIDR·루프백·멀티캐스트·미지정 주소, 빈 활성 목록, 잘못된 포트는 400이다. 포트는 1–65535이며 최대 32개다. 활성화된 목록에서 IP를 삭제해도 기존 SSH 연결은 유지하고 새 연결만 제한한다.
 
-`state`에는 `capable`, `applied_revision`, `error`, `reported`가 있다. 최신 서버 heartbeat가 60초 이내이고 capable=1이며 현재 revision과 applied_revision이 일치하고 error가 비었을 때 적용 완료로 표시한다. 연결이 끊기면 마지막 보고가 성공이어도 현재 상태는 확인 불가다. 이력 상태는 `pending`, `succeeded`, `failed`, `superseded`이고 요청자와 시각을 저장한다. 활성 차단 또는 적용되지 않은 변경이 남은 서버의 폐기는 409다.
+명시적인 모드 변경은 기존 `bans`를 비운다. 기존 보호 IP는 허용 목록에 자동으로 포함하지 않는다. `mode`를 생략한 설정 요청은 현재 모드를 유지하고, `protected`를 생략하면 기존 보호 목록을 유지한다. 이전 `POST /api/servers/{id}/bans`, `DELETE /api/servers/{id}/bans/{ip}`는 이전 정책 호환용이다. 화이트리스트로 전환한 뒤 차단 추가는 거부한다.
+
+수집 배치에 `can_firewall:true`, `can_allowlist:true` 및 선택적인 `firewall_result:{"revision":"...","error":""}`를 보낸다. `state[].capable`은 0(미지원), 1(기존 차단만 지원), 2(화이트리스트 지원)다. 정책은 매 heartbeat의 `firewall` 필드로 재전송하며 에이전트는 로컬 저장 후 적용하고 다음 배치에서 결과를 보고한다. 다른 서버·이전 revision·지원하지 않는 수집기의 결과로 완료 처리하지 않는다. 화이트리스트 정책은 구형 수집기에 전달하지 않는다. 중앙 서버를 먼저 업데이트한 뒤 수집기를 업데이트해야 한다.
+
+이력 `action`은 `allow`, `remove_allow`, `settings`와 이전 `ban`, `unban`을 포함한다. `status`는 `pending`, `succeeded`, `failed`, `superseded`다. 일반 관리자는 배정 서버의 목록만 변경할 수 있고 모드·포트 설정은 최고 관리자 전용이다. 활성 화이트리스트나 기존 차단 규칙이 남아 있거나 정책 해제의 적용 보고를 받지 못한 서버는 폐기할 수 없다(409).

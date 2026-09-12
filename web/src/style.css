@@ -1747,3 +1747,19 @@ dl.confirmation-summary {
     width: auto;
   }
 }
+
+.access-policy-summary strong {
+  color: var(--text);
+}
+.access-policy-summary p {
+  margin-top: 4px;
+}
+.legacy-policy summary {
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 28px;
+}
+.legacy-policy ul {
+  margin: 12px 0;
+  padding-left: 20px;
+}

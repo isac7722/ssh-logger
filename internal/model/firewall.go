@@ -11,6 +11,8 @@ type IPBan struct {
 }
 type FirewallPolicy struct {
 	Revision  string   `json:"revision"`
+	Mode      string   `json:"mode,omitempty"` // Empty is the legacy denylist policy.
+	Allowed   []string `json:"allowed,omitempty"`
 	Ports     []int    `json:"ports"`
 	Protected []string `json:"protected"`
 	Bans      []IPBan  `json:"bans"`
@@ -32,6 +34,26 @@ func CanonicalIP(raw string) (string, error) {
 	return ip.String(), nil
 }
 func (p FirewallPolicy) Validate() error {
+	if p.Mode != "" && p.Mode != "allowlist" && p.Mode != "off" {
+		return fmt.Errorf("알 수 없는 SSH 접근 정책입니다.")
+	}
+	if p.Mode != "" && len(p.Bans) > 0 {
+		return fmt.Errorf("화이트리스트와 기존 차단 규칙을 함께 적용할 수 없습니다.")
+	}
+	if p.Mode == "allowlist" && len(p.Allowed) == 0 {
+		return fmt.Errorf("화이트리스트를 사용하려면 허용 IP가 최소 1개 필요합니다.")
+	}
+	if len(p.Allowed) > 1000 {
+		return fmt.Errorf("허용 IP는 최대 1000개까지 등록할 수 있습니다.")
+	}
+	allowed := map[string]bool{}
+	for _, ip := range p.Allowed {
+		v, e := CanonicalIP(ip)
+		if e != nil || v != ip || allowed[ip] {
+			return fmt.Errorf("중복 또는 잘못된 허용 IP입니다.")
+		}
+		allowed[ip] = true
+	}
 	if p.Revision == "" || len(p.Revision) > 100 || len(p.Ports) == 0 || len(p.Ports) > 32 || len(p.Protected) > 1000 || len(p.Bans) > 1000 {
 		return fmt.Errorf("잘못된 방화벽 정책입니다.")
 	}

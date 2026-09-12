@@ -83,6 +83,8 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("PUT /api/servers/{id}/firewall/settings", a.auth(a.super(a.assigned(a.firewallSettings))))
 	m.HandleFunc("POST /api/servers/{id}/bans", a.auth(a.assigned(a.banIP)))
 	m.HandleFunc("DELETE /api/servers/{id}/bans/{ip}", a.auth(a.assigned(a.unbanIP)))
+	m.HandleFunc("POST /api/servers/{id}/allowlist", a.auth(a.assigned(a.allowIP)))
+	m.HandleFunc("DELETE /api/servers/{id}/allowlist/{ip}", a.auth(a.assigned(a.removeAllowedIP)))
 	m.HandleFunc("GET /api/overview", a.auth(a.overview))
 	m.HandleFunc("GET /api/settings", a.auth(a.super(a.settings)))
 	m.HandleFunc("PUT /api/settings", a.auth(a.super(a.saveSettings)))
@@ -271,7 +273,7 @@ func (a *App) changeToken(w http.ResponseWriter, r *http.Request, revoke bool) {
 	e := a.store.transaction(r.Context(), func(tx *sql.Tx) error {
 		if revoke {
 			var pending int
-			if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM firewall_policies WHERE server_id=? AND (json_array_length(policy,'$.bans')>0 OR (revision!=applied_revision AND EXISTS(SELECT 1 FROM firewall_history WHERE server_id=?)))`, r.PathValue("id"), r.PathValue("id")).Scan(&pending); err != nil {
+			if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM firewall_policies WHERE server_id=? AND (json_array_length(policy,'$.bans')>0 OR json_extract(policy,'$.mode')='allowlist' OR (revision!=applied_revision AND EXISTS(SELECT 1 FROM firewall_history WHERE server_id=?)))`, r.PathValue("id"), r.PathValue("id")).Scan(&pending); err != nil {
 				return err
 			}
 			if pending > 0 {
@@ -286,7 +288,7 @@ func (a *App) changeToken(w http.ResponseWriter, r *http.Request, revoke bool) {
 		return e
 	})
 	if errors.Is(e, pendingFirewall) {
-		fail(w, 409, "IP 차단을 모두 해제하고 에이전트 적용 완료를 확인한 뒤 서버를 폐기하세요.")
+		fail(w, 409, "SSH 접근 제어를 끄고 에이전트 적용 완료를 확인한 뒤 서버를 폐기하세요.")
 		return
 	}
 	if e != nil {

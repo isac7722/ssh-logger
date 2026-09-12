@@ -129,3 +129,23 @@ docker run --rm --cap-add NET_ADMIN -e SSHLOGGER_FIREWALL_TEST=disposable   -v "
 - 1440px 데스크톱, 375px 모바일 및 812×375 가로 화면의 가로 넘침과 화면 캡처를 확인했다. 동작 감소 설정에서도 확인했다.
 - 브라우저 테스트의 `TEST_PASSWORD_FILE` 환경 변수로 테스트용 비밀번호 파일 경로를 지정할 수 있다. 생략하면 기존 컨테이너 경로 `/run/test-password`를 사용한다. 실행 명령: `TEST_PASSWORD_FILE=/path/to/test-password npm test --prefix tests/browser` (기본 테스트 서버 주소 `http://localhost:18080`).
 - 이 검증은 합성 데이터와 에이전트 응답을 사용했다. 운영 계정·원격 방화벽은 변경하지 않았다.
+
+## SSH 화이트리스트 전환 검증 (2026-09-13)
+
+- Linux 컨테이너에서 Go 전체 테스트와 `go vet ./...` 통과. API 인증·서버 배정·super admin 전용 활성화, IP 정규화·중복 등록, 빈 목록 활성화 및 마지막 허용 IP 삭제 거부, 구형 에이전트에 정책 전달·적용 승인 방지, 접근 제어 해제와 적용 확인 전 서버 폐기 거부를 검증했다.
+- 기존 차단 정책은 명시적인 전환 전까지 보존한다. 허용 IP 등록만으로 활성화되지 않으며, 포트만 수정할 때 기존 보호 IP가 사라지지 않는 회귀 테스트도 통과했다.
+- 격리된 Docker 네트워크 네임스페이스에서 실제 nftables와 TCP로 IPv4·IPv6를 검증했다. 목록에 없는 IP의 새 연결 거부, 최초 활성화 이전 연결 유지, 허용 IP 삭제 이후 기존 연결 유지, 다른 서비스 포트 유지, 한 주소 계열만 허용했을 때 반대 계열 차단, 비활성화 후 연결 복구를 확인했다. 다른 소유자의 방화벽 테이블 유지와 저장된 정책의 재시작 복구도 확인했다.
+- 연결 추적 시작 이전의 세션도 유지하도록 새 연결의 SYN 패킷을 제한한다. 실제 TCP 연결 테스트로 이 동작을 검증했으며, 운영 SSH 세션이나 호스트 방화벽은 변경하지 않았다.
+- TypeScript 검사·프로덕션 웹 빌드 통과. Chromium 브라우저 테스트 6개 통과(전체 실행에서 5개 통과 후, 비활성화된 option 확인 방식 수정으로 나머지 1개 재실행 통과). 허용 IP 등록·활성화·삭제, 권한 제한, 확인 취소, 마지막 IP 삭제 방지, 모달·키보드 탐색·설정 초안 유지와 모바일 가로 넘침을 확인했다. 1440px 데스크톱과 375px 모바일 캡처도 검토했다.
+- macOS의 `make integration`은 Linux 에이전트 실행 단계에서 실행 형식 오류로 중단됐다. 같은 `scripts/integration.py`를 일회용 Linux 컨테이너에서 실행하여 실제 에이전트 → HTTP API → SQLite, 마스킹·세션 연결·재시작·로그 회전 검증을 통과했다.
+- 로컬 한국 시간대에서 기존 날짜 집계 테스트 2개가 실패하는 현상을 변경 전 HEAD에서도 재현했다. UTC 환경의 서버·모델 테스트 및 위 Linux 전체 테스트는 통과했다. 날짜 집계 코드는 이번 변경에 포함하지 않았다.
+- 운영 적용에는 중앙 서버를 먼저 업데이트한 뒤 각 대상 에이전트를 업데이트해야 한다. 허용 IP를 먼저 등록하고 명시적으로 활성화한다. 실제 원격 호스트 재부팅과 운영 배포는 수행하지 않았다.
+
+화이트리스트 커널 테스트 재실행(호스트 네트워크 옵션을 추가하지 말 것):
+
+```bash
+docker run --rm --cap-add NET_ADMIN -e SSHLOGGER_FIREWALL_TEST=disposable \
+  -v "$PWD:/src:ro" -w /src \
+  -v sshlogger-gomod:/go/pkg/mod -v sshlogger-gocache:/root/.cache/go-build \
+  golang:1.26-alpine sh -c 'apk add --no-cache nftables iproute2 && go test ./agent -run TestAllowlistKernel -v'
+```

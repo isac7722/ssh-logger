@@ -110,7 +110,8 @@ func main() {
 			if e != nil {
 				health = "session_scan_error"
 			}
-			b := model.Batch{CanFirewall: firewallAvailable(), FirewallResult: firewallResult, CanTerminate: canTerminate, TerminationResults: results, Events: events, Backlog: count, Dropped: s.cp.Dropped, Health: health, ActiveSessions: active}
+			canFirewall := firewallAvailable()
+			b := model.Batch{CanFirewall: canFirewall, CanAllowlist: canFirewall, FirewallResult: firewallResult, CanTerminate: canTerminate, TerminationResults: results, Events: events, Backlog: count, Dropped: s.cp.Dropped, Health: health, ActiveSessions: active}
 			response, sendErr := sendBatch(ctx, client, strings.TrimRight(*endpoint, "/")+"/api/ingest", *tokenFile, b)
 			if e = sendErr; e != nil {
 				log.Printf("delivery failed (records retained): %v", e)

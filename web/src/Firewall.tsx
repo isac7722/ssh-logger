@@ -7,7 +7,7 @@ type Props = {
   superAdmin: boolean;
   initial?: { server: string; ip: string };
 };
-type Tab = "bans" | "history" | "settings";
+type Tab = "allowed" | "history" | "settings";
 type Pending = {
   title: string;
   path: string;
@@ -17,7 +17,7 @@ type Pending = {
   detail: string;
 };
 const tabs: { id: Tab; label: string }[] = [
-  { id: "bans", label: "차단 목록" },
+  { id: "allowed", label: "허용 IP" },
   { id: "history", label: "변경 이력" },
   { id: "settings", label: "방화벽 설정" },
 ];
@@ -25,17 +25,17 @@ const fmt = (v: number) => (v ? new Date(v).toLocaleString("ko-KR") : "—");
 export function Firewall({ api, servers, superAdmin, initial }: Props) {
   const [server, setServer] = useState(initial?.server || "");
   const [ip, setIP] = useState(initial?.ip || "");
-  const [disconnect, setDisconnect] = useState(false);
+
   const [data, setData] = useState<Row | null>(null);
   const [ports, setPorts] = useState("22");
-  const [protectedIPs, setProtected] = useState("");
+  const [mode, setMode] = useState("off");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [fetchError, setFetchError] = useState("");
   const [notice, setNotice] = useState("");
   const [page, setPage] = useState(0);
   const [refresh, setRefresh] = useState(0);
-  const [tab, setTab] = useState<Tab>("bans");
+  const [tab, setTab] = useState<Tab>("allowed");
   const [pending, setPending] = useState<Pending | null>(null);
   const [awaitingPolicy, setAwaitingPolicy] = useState(false);
   const dirty = useRef(false);
@@ -57,7 +57,7 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
           setFetchError("");
           if (!dirty.current) {
             setPorts(x.policy.ports.join(", "));
-            setProtected(x.policy.protected.join("\n"));
+            setMode(x.policy.mode || (x.policy.bans.length ? "legacy" : "off"));
           }
         }
       } catch (e) {
@@ -80,10 +80,10 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
     setError("");
     setFetchError("");
     setPending(null);
-    setDisconnect(false);
+
     setIP("");
     setPorts("22");
-    setProtected("");
+    setMode("off");
     dirty.current = false;
     mutationVersion.current += 1;
     setAwaitingPolicy(false);
@@ -108,7 +108,6 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
       if (pending.path === "/firewall/settings") dirty.current = false;
       if (pending.method === "POST") {
         setIP("");
-        setDisconnect(false);
       }
       setPending(null);
       setNotice("요청을 저장했습니다.");
@@ -125,13 +124,15 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
     !awaitingPolicy &&
     online &&
     state?.capable &&
+    (data?.policy.mode !== "allowlist" || state.capable >= 2) &&
     state?.applied_revision === data?.policy.revision &&
     !state?.error;
   const status = fetchError
     ? "상태 확인 불가"
     : !online
       ? "연결 끊김"
-      : !state?.capable
+      : !state?.capable ||
+          (data?.policy.mode === "allowlist" && state.capable < 2)
         ? "에이전트 확인 필요"
         : awaitingPolicy
           ? "적용 대기"
@@ -142,6 +143,8 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
               : "적용 대기";
   const tone =
     fetchError || state?.error ? "error" : applied ? "success" : "warning";
+  const allowed: string[] = data?.policy.allowed || [];
+  const enabled = data?.policy.mode === "allowlist";
   const controlsDisabled = busy || awaitingPolicy || !!fetchError;
   return (
     <div className="firewall-page management-page">
@@ -152,7 +155,7 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
             aria-label="대상 서버"
             value={server}
             disabled={busy}
-            onChange={(e) => selectServer(e.target.value)}
+            onChange={(event) => selectServer(event.target.value)}
           >
             <option value="">서버 선택</option>
             {servers.map((s) => (
@@ -193,7 +196,7 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
             }
           >
             {servers.length
-              ? "서버를 선택하면 차단된 IP와 방화벽 적용 상태를 확인할 수 있습니다."
+              ? "서버를 선택하면 SSH 허용 IP와 적용 상태를 확인할 수 있습니다."
               : superAdmin
                 ? "서버 관리에서 서버를 먼저 등록하세요."
                 : "관리자에게 서버 배정을 요청하세요."}
@@ -202,32 +205,66 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
       ) : !data ? (
         !fetchError && (
           <div className="panel loading-state" role="status">
-            방화벽 정보를 불러오는 중…
+            접근 정책을 불러오는 중…
           </div>
         )
       ) : (
         <>
-          {!state?.capable && (
+          {state?.capable < 2 || !state ? (
             <div className="form-callout">
-              이 서버에서 IP 차단을 적용하려면 에이전트 업데이트와 nftables
-              설치가 필요합니다.
+              화이트리스트를 사용하려면 이 서버의 에이전트를 업데이트하고
+              nftables를 설치하세요. 허용 IP는 미리 등록할 수 있습니다.
             </div>
-          )}
+          ) : null}
           {state?.error && !awaitingPolicy && (
             <div className="alert" role="alert">
-              방화벽 적용 실패: {state.error}
+              접근 정책 적용 실패: {state.error}
             </div>
+          )}
+          <div className="form-callout access-policy-summary">
+            <strong>
+              {enabled ? "화이트리스트 사용 중" : "화이트리스트 꺼짐"}
+            </strong>
+            <p>
+              {enabled
+                ? "허용 IP만 새 SSH 연결을 시작할 수 있습니다. 이미 연결된 세션은 유지합니다."
+                : "허용 IP를 등록한 뒤 방화벽 설정에서 화이트리스트를 켜세요. 등록만으로는 접속을 제한하지 않습니다."}
+            </p>
+          </div>
+          {!data.policy.mode && data.policy.bans.length > 0 && (
+            <details className="form-callout legacy-policy">
+              <summary>
+                기존 차단 규칙 {data.policy.bans.length}개 유지 중
+              </summary>
+              <p>
+                화이트리스트를 켜거나 접근 제어를 끄면 기존 차단 규칙을
+                대체합니다. 기존 차단 IP는 허용 목록으로 옮기지 않습니다.
+              </p>
+              <ul>
+                {data.policy.bans.map((ban: Row) => (
+                  <li key={ban.ip}>
+                    <span className="numeric">{ban.ip}</span> ·{" "}
+                    {ban.disconnect ? "기존 + 새 연결 차단" : "새 연결 차단"}
+                  </li>
+                ))}
+              </ul>
+              {data.policy.protected.length > 0 && (
+                <p>
+                  기존 보호 IP: {data.policy.protected.join(", ")}. 전환 후에도
+                  허용하려면 허용 목록에 직접 등록하세요.
+                </p>
+              )}
+            </details>
           )}
           <div
             className="management-tabs"
             role="tablist"
-            aria-label="방화벽 관리"
+            aria-label="SSH 접근 관리"
           >
             {tabs.map((item, index) => (
               <button
                 key={item.id}
                 id={`firewall-tab-${item.id}`}
-                type="button"
                 role="tab"
                 aria-selected={tab === item.id}
                 aria-controls="firewall-panel"
@@ -250,8 +287,8 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                 }}
               >
                 {item.label}
-                {item.id === "bans" && (
-                  <span className="count-pill">{data.policy.bans.length}</span>
+                {item.id === "allowed" && (
+                  <span className="count-pill">{allowed.length}</span>
                 )}
               </button>
             ))}
@@ -262,7 +299,7 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
             aria-labelledby={`firewall-tab-${tab}`}
             tabIndex={0}
           >
-            {tab === "bans" && (
+            {tab === "allowed" && (
               <>
                 <section className="panel panel-body">
                   <div className="section-intro">
@@ -270,14 +307,8 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                       <Icon name="firewall" />
                     </span>
                     <div>
-                      <h2>IP 차단 추가</h2>
-                      <p>
-                        {host.name}의 SSH 포트{" "}
-                        <span className="numeric">
-                          {data.policy.ports.join(", ")}
-                        </span>
-                        에 적용됩니다.
-                      </p>
+                      <h2>허용 IP 추가</h2>
+                      <p>{host.name}의 SSH에 접속할 IP를 등록합니다.</p>
                     </div>
                   </div>
                   <form
@@ -285,73 +316,58 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                     onSubmit={(event) => {
                       event.preventDefault();
                       confirmAction({
-                        title: "IP 차단 확인",
-                        path: "/bans",
+                        title: "허용 IP 추가 확인",
+                        path: "/allowlist",
                         method: "POST",
                         ip: ip.trim(),
-                        body: { ip: ip.trim(), disconnect },
-                        detail: disconnect
-                          ? "기존 SSH 연결의 트래픽도 차단됩니다. 이 IP로 접속 중이라면 원격 접속을 잃을 수 있습니다."
-                          : "기존 SSH 연결은 유지하고, 이 IP의 새 SSH 연결을 차단합니다.",
+                        body: { ip: ip.trim() },
+                        detail: enabled
+                          ? "이 IP에서 새 SSH 연결을 시작할 수 있도록 허용합니다. 다른 방화벽과 SSH 인증 설정은 유지됩니다."
+                          : "허용 목록에 IP를 등록합니다. 접속을 제한하려면 방화벽 설정에서 화이트리스트를 켜세요.",
                       });
                     }}
                   >
                     <div className="ban-input-row">
                       <label>
-                        차단할 IP
+                        허용할 IP
                         <input
                           required
                           value={ip}
-                          onChange={(e) => setIP(e.target.value)}
+                          onChange={(event) => setIP(event.target.value)}
                           placeholder="203.0.113.10 또는 2001:db8::10"
+                          disabled={controlsDisabled}
                           autoComplete="off"
                           spellCheck={false}
-                          disabled={controlsDisabled}
+                          aria-describedby="allowed-ip-hint"
                         />
                       </label>
-                      <button
-                        className="danger-solid"
-                        disabled={controlsDisabled}
-                      >
-                        IP 차단
+                      <button className="primary" disabled={controlsDisabled}>
+                        <Icon name="plus" />
+                        IP 추가
                       </button>
                     </div>
-                    <div>
-                      <label className="check-label">
-                        <input
-                          type="checkbox"
-                          checked={disconnect}
-                          onChange={(e) => setDisconnect(e.target.checked)}
-                          disabled={controlsDisabled}
-                          aria-describedby="disconnect-hint"
-                        />
-                        기존 SSH 연결도 차단
-                      </label>
-                      <small id="disconnect-hint" className="checkbox-hint">
-                        {disconnect
-                          ? "기존 연결의 패킷도 차단됩니다. 실행 중인 프로세스 종료는 세션 종료 기능을 사용하세요."
-                          : "기본적으로 새 연결만 차단하며, 기존 SSH 연결은 유지합니다."}
-                      </small>
-                    </div>
+                    <small id="allowed-ip-hint">
+                      IPv4 또는 IPv6 단일 주소를 입력하세요. 서버에서 실제로
+                      보이는 접속 출발지 IP를 등록해야 합니다.
+                    </small>
                   </form>
                 </section>
                 <section className="panel">
                   <div className="panel-head">
                     <h2>
-                      차단된 IP{" "}
-                      <span className="count-pill">
-                        {data.policy.bans.length}
-                      </span>
+                      등록된 허용 IP{" "}
+                      <span className="count-pill">{allowed.length}</span>
                     </h2>
-                    <span className="section-meta">{host.name}</span>
+                    <span className="section-meta">
+                      SSH 포트 {data.policy.ports.join(", ")}
+                    </span>
                   </div>
-                  {data.policy.bans.length ? (
+                  {allowed.length ? (
                     <div className="table-wrap">
                       <table className="management-table">
                         <thead>
                           <tr>
                             <th scope="col">IP</th>
-                            <th scope="col">차단 범위</th>
                             <th scope="col">상태</th>
                             <th scope="col" className="action-cell">
                               관리
@@ -359,32 +375,45 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                           </tr>
                         </thead>
                         <tbody>
-                          {data.policy.bans.map((ban: Row) => (
-                            <tr key={ban.ip}>
-                              <td className="numeric">{ban.ip}</td>
+                          {allowed.map((address) => (
+                            <tr key={address}>
+                              <td className="numeric">{address}</td>
                               <td>
-                                {ban.disconnect ? "기존 + 새 연결" : "새 연결"}
-                              </td>
-                              <td>
-                                <span className={`status-pill ${tone}`}>
-                                  {applied && !fetchError ? "차단됨" : status}
+                                <span
+                                  className={`status-pill ${enabled ? tone : "warning"}`}
+                                >
+                                  {!enabled
+                                    ? "등록됨 · 정책 꺼짐"
+                                    : applied && !fetchError
+                                      ? "허용됨"
+                                      : status}
                                 </span>
                               </td>
                               <td className="action-cell">
                                 <button
-                                  disabled={controlsDisabled}
+                                  className="danger"
+                                  disabled={
+                                    controlsDisabled ||
+                                    (enabled && allowed.length === 1)
+                                  }
+                                  aria-describedby={
+                                    enabled && allowed.length === 1
+                                      ? "last-allowed-hint"
+                                      : undefined
+                                  }
                                   onClick={() =>
                                     confirmAction({
-                                      title: "차단 해제 확인",
-                                      path: `/bans/${encodeURIComponent(ban.ip)}`,
+                                      title: "허용 IP 삭제 확인",
+                                      path: `/allowlist/${encodeURIComponent(address)}`,
                                       method: "DELETE",
-                                      ip: ban.ip,
-                                      detail:
-                                        "SSH Logger가 만든 이 IP의 차단 규칙을 제거합니다. 다른 방화벽 규칙은 유지됩니다.",
+                                      ip: address,
+                                      detail: enabled
+                                        ? "이 IP의 새 SSH 연결이 제한됩니다. 이미 연결된 SSH 세션은 유지됩니다."
+                                        : "허용 목록에서 IP를 삭제합니다. 화이트리스트가 꺼져 있으므로 현재 접속에는 영향을 주지 않습니다.",
                                     })
                                   }
                                 >
-                                  차단 해제
+                                  삭제
                                 </button>
                               </td>
                             </tr>
@@ -395,13 +424,15 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                   ) : (
                     <EmptyState
                       icon="firewall"
-                      title="등록된 차단 IP가 없습니다."
+                      title="등록된 허용 IP가 없습니다."
                     >
-                      위에서 IP를 입력하면 이 서버의 SSH 접근을 차단합니다.
+                      관리자와 필요한 사용자의 IP를 먼저 등록하세요.
                     </EmptyState>
                   )}
-                  <div className="panel-footnote">
-                    차단 해제는 SSH Logger가 만든 규칙만 제거합니다.
+                  <div className="panel-footnote" id="last-allowed-hint">
+                    {enabled && allowed.length === 1
+                      ? "마지막 허용 IP입니다. 다른 IP를 추가하거나 화이트리스트를 끈 뒤 삭제할 수 있습니다."
+                      : "허용 목록을 변경해도 이미 연결된 SSH 세션은 유지합니다."}
                   </div>
                 </section>
               </>
@@ -413,10 +444,10 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                     <Icon name="settings" />
                   </span>
                   <div>
-                    <h2>SSH 포트 · 보호 IP</h2>
+                    <h2>화이트리스트 설정</h2>
                     <p>
-                      차단 규칙이 적용될 포트와 차단에서 보호할 관리 IP를
-                      설정합니다.
+                      지정한 SSH 포트의 새 연결에만 적용합니다. 다른 서비스
+                      포트는 변경하지 않습니다.
                     </p>
                   </div>
                 </div>
@@ -426,7 +457,7 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                     onSubmit={(event) => {
                       event.preventDefault();
                       confirmAction({
-                        title: "방화벽 설정 확인",
+                        title: "접근 정책 변경 확인",
                         path: "/firewall/settings",
                         method: "PUT",
                         body: {
@@ -434,50 +465,79 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                             .split(/[\s,]+/)
                             .filter(Boolean)
                             .map(Number),
-                          protected: protectedIPs
-                            .split(/[\s,]+/)
-                            .filter(Boolean),
+                          ...(mode === "legacy" ? {} : { mode }),
                         },
-                        detail: `SSH 포트: ${ports}\n보호 IP: ${protectedIPs || "없음"}`,
+                        detail: `SSH 포트: ${ports}\n${mode === "allowlist" ? `허용 IP: ${allowed.join(", ")}\n목록에 없는 IP의 새 SSH 연결을 제한합니다. 기존 연결은 유지합니다. 관리에 사용할 IP가 포함되어 있는지 확인하세요.` : mode === "legacy" ? "기존 차단 규칙을 유지합니다." : "이 도구가 관리하는 SSH 접근 제한을 해제합니다. 다른 방화벽의 규칙은 유지됩니다."}${data.policy.bans.length && mode !== "legacy" ? "\n기존 차단 규칙은 이 정책으로 대체됩니다." : ""}`,
                       });
                     }}
                   >
                     <label>
+                      접근 정책
+                      <select
+                        aria-label="접근 정책"
+                        value={mode}
+                        disabled={controlsDisabled}
+                        onChange={(event) => {
+                          dirty.current = true;
+                          setMode(event.target.value);
+                        }}
+                        aria-describedby="policy-hint"
+                      >
+                        {!data.policy.mode && data.policy.bans.length > 0 && (
+                          <option value="legacy">기존 차단 정책 유지</option>
+                        )}
+                        <option value="off">
+                          꺼짐 · 이 도구의 접근 제한 해제
+                        </option>
+                        <option
+                          value="allowlist"
+                          disabled={
+                            state?.capable < 2 || !state || !allowed.length
+                          }
+                        >
+                          화이트리스트 · 허용 IP만 접속
+                        </option>
+                      </select>
+                      <small id="policy-hint">
+                        허용 IP를 1개 이상 등록하고 에이전트 업데이트를 완료해야
+                        켤 수 있습니다.
+                      </small>
+                    </label>
+                    <label>
                       SSH 포트 (쉼표로 구분)
                       <input
-                        required
                         aria-label="SSH 포트 (쉼표로 구분)"
+                        required
                         value={ports}
                         disabled={controlsDisabled}
-                        onChange={(e) => {
+                        onChange={(event) => {
                           dirty.current = true;
-                          setPorts(e.target.value);
+                          setPorts(event.target.value);
                         }}
                         aria-describedby="ports-hint"
                       />
-                      <small id="ports-hint">예: 22, 2222</small>
-                    </label>
-                    <label>
-                      보호할 관리 IP (줄바꿈 또는 쉼표로 구분)
-                      <textarea
-                        aria-label="보호할 관리 IP (줄바꿈 또는 쉼표로 구분)"
-                        value={protectedIPs}
-                        disabled={controlsDisabled}
-                        onChange={(e) => {
-                          dirty.current = true;
-                          setProtected(e.target.value);
-                        }}
-                        rows={4}
-                        placeholder="예: 203.0.113.1"
-                        aria-describedby="protected-hint"
-                      />
-                      <small id="protected-hint">
-                        보호 IP는 차단할 수 없습니다. 이미 차단 중인 IP는 먼저
-                        차단 해제한 뒤 등록하세요.
+                      <small id="ports-hint">
+                        예: 22, 2222. 실제 SSH 서비스가 사용하는 포트를
+                        지정하세요.
                       </small>
                     </label>
+                    <div className="form-callout">
+                      <strong>기존 SSH 연결 유지</strong>
+                      <p>
+                        화이트리스트를 켜거나 IP를 삭제해도 기존 세션은
+                        유지합니다. 필요한 경우 접속 세션 화면에서 별도로 종료할
+                        수 있습니다.
+                      </p>
+                    </div>
                     <div className="form-footer">
-                      <button className="primary" disabled={controlsDisabled}>
+                      <button
+                        className="primary"
+                        disabled={
+                          controlsDisabled ||
+                          (mode === "allowlist" &&
+                            (!allowed.length || !state || state.capable < 2))
+                        }
+                      >
                         방화벽 설정 저장
                       </button>
                       {dirty.current && (
@@ -491,17 +551,24 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                   <div className="settings-summary">
                     <dl>
                       <div>
-                        <dt>SSH 포트</dt>
-                        <dd>{data.policy.ports.join(", ")}</dd>
+                        <dt>접근 정책</dt>
+                        <dd>
+                          {enabled
+                            ? "화이트리스트"
+                            : data.policy.bans.length
+                              ? "기존 차단 정책"
+                              : "꺼짐"}
+                        </dd>
                       </div>
                       <div>
-                        <dt>보호 IP</dt>
-                        <dd>{data.policy.protected.join(", ") || "없음"}</dd>
+                        <dt>SSH 포트</dt>
+                        <dd>{data.policy.ports.join(", ")}</dd>
                       </div>
                     </dl>
                     <div className="form-callout">
                       <Icon name="lock" />
-                      방화벽 설정은 최고 관리자가 변경할 수 있습니다.
+                      화이트리스트 활성화와 포트 설정은 최고 관리자가 변경할 수
+                      있습니다.
                     </div>
                   </div>
                 )}
@@ -513,7 +580,7 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                   <div>
                     <h2>변경 이력</h2>
                     <p className="section-description">
-                      IP 차단·해제와 설정 변경 결과를 확인합니다.
+                      허용 IP와 접근 정책의 변경 결과를 확인합니다.
                     </p>
                   </div>
                 </div>
@@ -536,8 +603,10 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                             <td>{h.requested_by}</td>
                             <td>
                               {{
-                                ban: "차단",
-                                unban: "차단 해제",
+                                allow: "허용 IP 추가",
+                                remove_allow: "허용 IP 삭제",
+                                ban: "IP 차단 (이전)",
+                                unban: "차단 해제 (이전)",
                                 settings: "설정 변경",
                               }[h.action as string] || h.action}
                             </td>
@@ -564,7 +633,7 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                   </div>
                 ) : (
                   <EmptyState icon="history" title="아직 변경 이력이 없습니다.">
-                    차단·해제 또는 설정을 변경하면 이곳에 기록됩니다.
+                    허용 IP나 접근 정책을 변경하면 이곳에 기록됩니다.
                   </EmptyState>
                 )}
                 {(page > 0 || data.history.length > 50) && (
@@ -612,15 +681,7 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                 </div>
               )}
             </dl>
-            <div
-              className={
-                pending.method === "POST"
-                  ? "form-callout warning-callout"
-                  : "form-callout"
-              }
-            >
-              {pending.detail}
-            </div>
+            <div className="form-callout">{pending.detail}</div>
             {error && (
               <div className="alert" role="alert">
                 {error}
@@ -638,7 +699,7 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
               </button>
               <button
                 className={
-                  pending.method === "POST" ? "danger-solid" : "primary"
+                  pending.method === "DELETE" ? "danger-solid" : "primary"
                 }
                 disabled={busy}
                 onClick={change}

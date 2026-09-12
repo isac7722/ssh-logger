@@ -68,6 +68,17 @@ func (a *App) changeFirewall(w http.ResponseWriter, r *http.Request, ip, action 
 			message = e.Error()
 			return invalid
 		}
+		if p.Mode == "allowlist" {
+			var capable int
+			e = tx.QueryRowContext(r.Context(), "SELECT capable FROM firewall_policies WHERE server_id=?", r.PathValue("id")).Scan(&capable)
+			if e != nil && !errors.Is(e, sql.ErrNoRows) {
+				return e
+			}
+			if capable < 2 {
+				message = "화이트리스트를 지원하는 에이전트로 업데이트한 뒤 다시 시도하세요."
+				return invalid
+			}
+		}
 		raw, e := json.Marshal(p)
 		if e != nil {
 			return e
@@ -103,6 +114,9 @@ func (a *App) banIP(w http.ResponseWriter, r *http.Request) {
 	}
 	b.IP = ip
 	a.changeFirewall(w, r, ip, "ban", func(p *model.FirewallPolicy) error {
+		if p.Mode != "" {
+			return errors.New("화이트리스트 전환 후에는 허용 IP 목록에서 접근을 관리하세요.")
+		}
 		for i, existing := range p.Bans {
 			if existing.IP == ip {
 				p.Bans[i] = b
@@ -134,12 +148,10 @@ func (a *App) firewallSettings(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Ports     []int    `json:"ports"`
 		Protected []string `json:"protected"`
+		Mode      *string  `json:"mode"`
 	}
 	if !decode(w, r, &b) {
 		return
-	}
-	if b.Protected == nil {
-		b.Protected = []string{}
 	}
 	for i, ip := range b.Protected {
 		canonical, err := model.CanonicalIP(ip)
@@ -149,7 +161,61 @@ func (a *App) firewallSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		b.Protected[i] = canonical
 	}
-	a.changeFirewall(w, r, "", "settings", func(p *model.FirewallPolicy) error { p.Ports = b.Ports; p.Protected = b.Protected; return nil })
+	a.changeFirewall(w, r, "", "settings", func(p *model.FirewallPolicy) error {
+		p.Ports = b.Ports
+		if b.Protected != nil {
+			p.Protected = b.Protected
+		}
+		if b.Mode != nil {
+			if *b.Mode != "allowlist" && *b.Mode != "off" {
+				return errors.New("접근 정책은 allowlist 또는 off로 설정하세요.")
+			}
+			p.Mode = *b.Mode
+			p.Bans = []model.IPBan{}
+		}
+		return nil
+	})
+}
+
+func (a *App) allowIP(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		IP string `json:"ip"`
+	}
+	if !decode(w, r, &b) {
+		return
+	}
+	ip, err := model.CanonicalIP(b.IP)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	a.changeFirewall(w, r, ip, "allow", func(p *model.FirewallPolicy) error {
+		for _, existing := range p.Allowed {
+			if existing == ip {
+				return nil
+			}
+		}
+		p.Allowed = append(p.Allowed, ip)
+		return nil
+	})
+}
+
+func (a *App) removeAllowedIP(w http.ResponseWriter, r *http.Request) {
+	ip, err := model.CanonicalIP(r.PathValue("ip"))
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	a.changeFirewall(w, r, ip, "remove_allow", func(p *model.FirewallPolicy) error {
+		allowed := []string{}
+		for _, existing := range p.Allowed {
+			if existing != ip {
+				allowed = append(allowed, existing)
+			}
+		}
+		p.Allowed = allowed
+		return nil
+	})
 }
 func ingestFirewall(r *http.Request, tx *sql.Tx, server string, b model.Batch, now int64) (*model.FirewallPolicy, error) {
 	p, err := readPolicy(r, tx, server)
@@ -160,13 +226,22 @@ func ingestFirewall(r *http.Request, tx *sql.Tx, server string, b model.Batch, n
 	if err != nil {
 		return nil, err
 	}
-	if _, err = tx.ExecContext(r.Context(), "INSERT INTO firewall_policies(server_id,revision,policy,capable) VALUES(?,?,?,?) ON CONFLICT(server_id) DO UPDATE SET capable=excluded.capable", server, p.Revision, string(raw), b.CanFirewall); err != nil {
+	// 0: unavailable, 1: legacy denylist, 2: allowlist + legacy support.
+	capable := 0
+	if b.CanFirewall {
+		capable = 1
+		if b.CanAllowlist {
+			capable = 2
+		}
+	}
+	compatible := b.CanFirewall && (p.Mode != "allowlist" || b.CanAllowlist)
+	if _, err = tx.ExecContext(r.Context(), "INSERT INTO firewall_policies(server_id,revision,policy,capable) VALUES(?,?,?,?) ON CONFLICT(server_id) DO UPDATE SET capable=excluded.capable", server, p.Revision, string(raw), capable); err != nil {
 		return nil, err
 	}
 	if result := b.FirewallResult; result != nil && result.Revision == p.Revision {
 		applied := ""
 		status := "failed"
-		if result.Error == "" && b.CanFirewall {
+		if result.Error == "" && compatible {
 			applied = p.Revision
 			status = "succeeded"
 		}
@@ -178,7 +253,9 @@ func ingestFirewall(r *http.Request, tx *sql.Tx, server string, b model.Batch, n
 		}
 	}
 	// Send the complete desired state every heartbeat, including after restarts or lost acknowledgements.
-	if !b.CanFirewall {
+	// Never send an allowlist to an older agent: it would ignore the new fields
+	// and replace its table with an empty denylist, silently opening access.
+	if !compatible {
 		return nil, nil
 	}
 	return &p, nil
