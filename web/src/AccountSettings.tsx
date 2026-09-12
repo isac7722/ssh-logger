@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Dialog, EmptyState, Icon, PasswordField } from "./UI";
 
 type Admin = { username: string; role: string; server_ids: string };
@@ -24,6 +24,8 @@ export function AccountSettings({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [reload, setReload] = useState(0);
+  const [deleting, setDeleting] = useState<Admin | null>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
   const [modal, setModal] = useState<"password" | "create" | Admin | null>(
     null,
   );
@@ -98,7 +100,11 @@ export function AccountSettings({
                 계정별 권한과 접근 가능한 서버를 관리합니다.
               </p>
             </div>
-            <button className="primary" onClick={() => open("create")}>
+            <button
+              ref={addButton}
+              className="primary"
+              onClick={() => open("create")}
+            >
               <Icon name="plus" />
               관리자 추가
             </button>
@@ -154,12 +160,30 @@ export function AccountSettings({
                           )}
                         </td>
                         <td className="action-cell">
-                          <button
-                            aria-label={`${admin.username} 권한 편집`}
-                            onClick={() => open(admin)}
-                          >
-                            편집
-                          </button>
+                          <div className="account-actions">
+                            <button
+                              aria-label={`${admin.username} 권한 편집`}
+                              onClick={() => open(admin)}
+                            >
+                              편집
+                            </button>
+                            <button
+                              className="danger"
+                              aria-label={`${admin.username} 계정 삭제`}
+                              disabled={admin.role === "super_admin"}
+                              title={
+                                admin.role === "super_admin"
+                                  ? "최고 관리자 계정은 삭제할 수 없습니다."
+                                  : undefined
+                              }
+                              onClick={() => {
+                                setNotice("");
+                                setDeleting(admin);
+                              }}
+                            >
+                              삭제
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -181,9 +205,25 @@ export function AccountSettings({
           )}
           <div className="panel-footnote">
             <Icon name="lock" />
-            일반 관리자는 배정된 서버에만 접근할 수 있습니다.
+            일반 관리자는 배정된 서버에만 접근할 수 있습니다. 최고 관리자 계정은
+            삭제할 수 없습니다.
           </div>
         </section>
+      )}
+      {superAdmin && deleting && (
+        <DeleteAccount
+          admin={deleting}
+          api={api}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setAdmins((rows) =>
+              rows.filter((admin) => admin.username !== deleting.username),
+            );
+            setNotice(`${deleting.username} 관리자 계정을 삭제했습니다.`);
+            setDeleting(null);
+            requestAnimationFrame(() => addButton.current?.focus());
+          }}
+        />
       )}
       {typeof modal === "string" && (
         <AccountForm
@@ -224,6 +264,79 @@ export function AccountSettings({
         />
       )}
     </div>
+  );
+}
+
+function DeleteAccount({
+  admin,
+  api,
+  onClose,
+  onDeleted,
+}: {
+  admin: Admin;
+  api: Props["api"];
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    // Focus after the native dialog opens; React autoFocus runs while hidden.
+    const frame = requestAnimationFrame(() => cancelButton.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  async function remove() {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/admins/${encodeURIComponent(admin.username)}`, "DELETE");
+      onDeleted();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Dialog
+      title="관리자 계정 삭제"
+      description="삭제할 계정과 영향을 확인하세요."
+      onClose={onClose}
+      busy={busy}
+    >
+      <div className="stack-form">
+        <div className="confirmation-summary">
+          <dl>
+            <div>
+              <dt>삭제할 계정</dt>
+              <dd>{admin.username}</dd>
+            </div>
+          </dl>
+          <p>
+            이 계정의 모든 대시보드 로그인 세션과 서버 배정이 삭제됩니다. 삭제한
+            계정은 복구할 수 없습니다.
+          </p>
+        </div>
+        <div className="form-callout">
+          서버의 SSH 연결과 수집된 기록, 기존 작업 이력은 유지됩니다.
+        </div>
+        {error && (
+          <div className="alert" role="alert">
+            {error}
+          </div>
+        )}
+        <div className="dialog-actions">
+          <button ref={cancelButton} disabled={busy} onClick={onClose}>
+            취소
+          </button>
+          <button className="danger-solid" disabled={busy} onClick={remove}>
+            {busy ? "삭제 중…" : "계정 삭제"}
+          </button>
+        </div>
+      </div>
+    </Dialog>
   );
 }
 

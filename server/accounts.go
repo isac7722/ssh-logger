@@ -19,6 +19,61 @@ func (a *App) admins(w http.ResponseWriter, r *http.Request) {
 	a.query(w, r, "SELECT a.username,COALESCE(r.role,'admin') AS role,COALESCE((SELECT json_group_array(server_id) FROM admin_servers WHERE username=a.username),'[]') AS server_ids FROM admins a LEFT JOIN admin_roles r ON r.username=a.username ORDER BY a.username")
 }
 
+func (a *App) deleteAdmin(w http.ResponseWriter, r *http.Request) {
+	forbidden := errors.New("super admin required")
+	protected := errors.New("protected account")
+	err := a.store.transaction(r.Context(), func(tx *sql.Tx) error {
+		// Recheck the caller and target inside the same transaction as deletion.
+		// A concurrent role change or logout must not bypass either restriction.
+		cookie, _ := r.Cookie("session")
+		var role string
+		err := tx.QueryRowContext(r.Context(), `SELECT COALESCE(a.role,'admin') FROM auth_sessions s
+			LEFT JOIN admin_roles a ON a.username=s.username WHERE s.token_hash=? AND s.expires>?`, hash(cookie.Value), time.Now().UnixMilli()).Scan(&role)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errCredentialsChanged
+		}
+		if err != nil {
+			return err
+		}
+		if role != "super_admin" {
+			return forbidden
+		}
+		target := r.PathValue("username")
+		if err = tx.QueryRowContext(r.Context(), `SELECT COALESCE(r.role,'admin') FROM admins a
+			LEFT JOIN admin_roles r ON r.username=a.username WHERE a.username=?`, target).Scan(&role); err != nil {
+			return err
+		}
+		if role == "super_admin" {
+			return protected
+		}
+		for _, query := range []string{
+			"DELETE FROM auth_sessions WHERE username=?",
+			"DELETE FROM admin_servers WHERE username=?",
+			"DELETE FROM admin_roles WHERE username=?",
+			"DELETE FROM admins WHERE username=?",
+		} {
+			if _, err = tx.ExecContext(r.Context(), query, target); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	switch {
+	case errors.Is(err, errCredentialsChanged):
+		fail(w, 401, "다시 로그인하세요.")
+	case errors.Is(err, forbidden):
+		fail(w, 403, "Super admin 권한이 필요합니다.")
+	case errors.Is(err, protected):
+		fail(w, 403, "최고 관리자 계정은 삭제할 수 없습니다.")
+	case errors.Is(err, sql.ErrNoRows):
+		fail(w, 404, "관리자 계정을 찾을 수 없습니다.")
+	case err != nil:
+		fail(w, 503, "관리자 계정 삭제에 실패했습니다.")
+	default:
+		reply(w, 200, map[string]bool{"ok": true})
+	}
+}
+
 func (a *App) createAdmin(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Username string `json:"username"`

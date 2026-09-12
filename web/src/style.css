@@ -1614,6 +1614,12 @@ button.danger-solid:hover {
 .password-input {
   position: relative;
 }
+.account-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .password-input input {
   padding-right: 66px;
 }

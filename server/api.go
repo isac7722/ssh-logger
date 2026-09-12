@@ -71,6 +71,7 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("PUT /api/me/password", a.auth(a.changePassword))
 	m.HandleFunc("GET /api/admins", a.auth(a.super(a.admins)))
 	m.HandleFunc("POST /api/admins", a.auth(a.super(a.createAdmin)))
+	m.HandleFunc("DELETE /api/admins/{username}", a.auth(a.super(a.deleteAdmin)))
 	m.HandleFunc("GET /api/servers", a.auth(a.servers))
 	m.HandleFunc("POST /api/servers", a.auth(a.super(a.createServer)))
 	m.HandleFunc("POST /api/servers/{id}/rotate", a.auth(a.super(a.rotate)))
