@@ -119,3 +119,13 @@ Linux 커널 감사 기능은 일반 컨테이너만으로 독립된 호스트�
 ```bash
 docker run --rm --cap-add NET_ADMIN -e SSHLOGGER_FIREWALL_TEST=disposable   -v "$PWD:/src:ro" -w /src   -v sshlogger-gomod:/go/pkg/mod -v sshlogger-gocache:/root/.cache/go-build   golang:1.26-alpine sh -c 'apk add --no-cache nftables iproute2 && go test ./agent -run TestFirewallKernel -v'
 ```
+
+## 관리 화면 UI·UX 개선 검증 (2026-09-13)
+
+- 관리자 계정 화면을 목록과 작업별 모달로 재구성하고, IP 차단 화면을 차단 목록·변경 이력·방화벽 설정 탭으로 분리했다. 공통 색상·간격·버튼·아이콘을 통일하고 모바일 관리자 목록을 카드 형태로 표시한다.
+- TypeScript 검사와 프로덕션 웹 빌드 통과 (`npm run build --prefix web`).
+- 격리된 로컬 Go 서버와 임시 SQLite DB에서 Chromium Playwright 테스트 6개 통과. 기존 로그인·검색·세션·관리자 생성·비밀번호 변경·서버 배정·IP 차단과 해제 검증을 유지했다.
+- 추가 검증: 모달 Escape 닫기와 초점 복원, 비밀번호 표시·오류 입력 초점, 방향키를 통한 탭 이동, 자동 조회 및 탭 전환 후 설정 초안 유지, 차단 확인 취소 시 API 정책 불변, 빈 이력의 페이지 이동 버튼 숨김.
+- 1440px 데스크톱, 375px 모바일 및 812×375 가로 화면의 가로 넘침과 화면 캡처를 확인했다. 동작 감소 설정에서도 확인했다.
+- 브라우저 테스트의 `TEST_PASSWORD_FILE` 환경 변수로 테스트용 비밀번호 파일 경로를 지정할 수 있다. 생략하면 기존 컨테이너 경로 `/run/test-password`를 사용한다. 실행 명령: `TEST_PASSWORD_FILE=/path/to/test-password npm test --prefix tests/browser` (기본 테스트 서버 주소 `http://localhost:18080`).
+- 이 검증은 합성 데이터와 에이전트 응답을 사용했다. 운영 계정·원격 방화벽은 변경하지 않았다.

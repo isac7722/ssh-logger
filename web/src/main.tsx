@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 import { Firewall } from "./Firewall";
 import { AccountSettings } from "./AccountSettings";
+import { Icon } from "./UI";
 import {
   ActivityControls,
   CommandText,
@@ -614,7 +615,7 @@ function App() {
           </span>
         </div>
         <div className="nav-label">WORKSPACE</div>
-        <nav>
+        <nav aria-label="주 메뉴">
           {(
             [
               "overview",
@@ -630,14 +631,15 @@ function App() {
               (v) =>
                 role === "super_admin" || !["servers", "settings"].includes(v),
             )
-            .map((v, i) => (
+            .map((v) => (
               <button
                 key={v}
                 className={view === v ? "selected" : ""}
+                aria-current={view === v ? "page" : undefined}
                 onClick={() => navigate(v)}
               >
                 <span aria-hidden="true">
-                  {["◫", "⇄", "≡", "▤", "⚙", "♙"][i]}
+                  <Icon name={v} />
                 </span>
                 {labels[v]}
               </button>
@@ -674,10 +676,11 @@ function App() {
             · 5초 간격
           </span>
         </header>
-        <div className="content">
+        <div
+          className={`content ${view === "accounts" || view === "firewall" ? "management-content" : ""}`}
+        >
           <div className="page-title">
             <div>
-              <div className="eyebrow">SSH LOGGER / MONITORING</div>
               <h1>{labels[view]}</h1>
               <p>
                 {view === "overview"
@@ -686,18 +689,13 @@ function App() {
                     ? "수집기를 연결하고 서버별 수집 상태를 관리하세요."
                     : view === "accounts"
                       ? "내 비밀번호와 관리자 계정을 관리하세요."
-                      : view === "settings"
-                        ? "기록 보관 기간을 관리하세요."
-                        : "계정과 서버별 기록을 탐색하세요."}
+                      : view === "firewall"
+                        ? "서버별 SSH 접근과 방화벽 적용 상태를 관리합니다."
+                        : view === "settings"
+                          ? "기록 보관 기간을 관리하세요."
+                          : "계정과 서버별 기록을 탐색하세요."}
               </p>
             </div>
-            <span className="date">
-              {new Date().toLocaleDateString("ko-KR", {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
-            </span>
           </div>
           {error && (
             <div className="alert" role="alert">
