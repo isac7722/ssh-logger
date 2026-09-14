@@ -4,10 +4,19 @@ import {
   startRegistration,
   browserSupportsWebAuthn,
 } from "@simplewebauthn/browser";
-import { Dialog, PasswordField } from "./UI";
+import { Dialog, EmptyState, Icon, PasswordField } from "./UI";
 
 type API = (path: string, method?: string, body?: unknown) => Promise<any>;
 type Key = { id: string; name: string; created: number; last_used: number };
+const passkeyDate = new Intl.DateTimeFormat("ko-KR", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
 type Action = {
   action: "add" | "delete" | "disable";
   target?: string;
@@ -116,79 +125,144 @@ export function Passkeys({
     }
   }
   return (
-    <section className="panel">
-      <div className="panel-head">
-        <div>
-          <h2>Passkey 2차 인증</h2>
-          <p>
-            {loading
-              ? "확인 중…"
-              : keys.length
-                ? "활성화됨 · 로그인 시 비밀번호와 Passkey를 확인합니다."
-                : "비활성화됨 · 현재 비밀번호 확인 후 Passkey를 등록하세요."}
-          </p>
+    <section className="panel passkey-panel" aria-labelledby="passkey-heading">
+      <div className="panel-head passkey-header">
+        <div className="identity-main">
+          <span className="identity-avatar">
+            <Icon name="firewall" />
+          </span>
+          <div>
+            <div className="passkey-title">
+              <h2 id="passkey-heading">Passkey 2차 인증</h2>
+              {!loading && !(error && !action) && (
+                <span
+                  className={`passkey-status${keys.length ? " is-active" : ""}`}
+                >
+                  {keys.length > 0 && <Icon name="check" />}
+                  {keys.length ? "활성화됨" : "비활성화됨"}
+                </span>
+              )}
+            </div>
+            <p className="section-description">
+              로그인 시 비밀번호에 Passkey 인증을 더해 계정을 보호합니다.
+            </p>
+          </div>
         </div>
         <button
+          className="passkey-add"
           onClick={() => open({ action: "add" })}
           disabled={loading || !available}
         >
+          <Icon name="plus" />
           Passkey 추가
         </button>
       </div>
-      {!action && error && (
-        <div className="alert" role="alert">
-          {error}
-          <button onClick={() => setReload((v) => v + 1)}>다시 시도</button>
+      <div className="passkey-body">
+        {!action && error && (
+          <div className="alert" role="alert">
+            {error}
+            <button onClick={() => setReload((v) => v + 1)}>다시 시도</button>
+          </div>
+        )}
+        {notice && (
+          <div className="notice" role="status">
+            {notice}
+          </div>
+        )}
+        {!loading && !available && !error && (
+          <div className="passkey-help" role="note">
+            <Icon name="info" />
+            <p>
+              Passkey를 지원하는 브라우저와 HTTPS 연결이 필요합니다. 로컬
+              개발에서는 localhost를 사용하세요.
+            </p>
+          </div>
+        )}
+        {loading ? (
+          <div className="passkey-loading" role="status">
+            Passkey를 확인하는 중…
+          </div>
+        ) : keys.length > 0 ? (
+          <div>
+            <h3 className="passkey-list-heading">
+              등록된 Passkey <span className="count-pill">{keys.length}</span>
+            </h3>
+            <ul className="passkey-list" aria-label="등록된 Passkey">
+              {keys.map((key) => (
+                <li key={key.id}>
+                  <span className="passkey-key-icon">
+                    <Icon name="key" />
+                  </span>
+                  <div className="passkey-detail">
+                    <strong>{key.name}</strong>
+                    <dl className="passkey-dates">
+                      <div>
+                        <dt>등록일</dt>
+                        <dd>
+                          <time dateTime={new Date(key.created).toISOString()}>
+                            {passkeyDate.format(key.created)}
+                          </time>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>최근 사용</dt>
+                        <dd>
+                          {key.last_used ? (
+                            <time
+                              dateTime={new Date(key.last_used).toISOString()}
+                            >
+                              {passkeyDate.format(key.last_used)}
+                            </time>
+                          ) : (
+                            "아직 사용하지 않음"
+                          )}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                  <button
+                    className="danger passkey-delete"
+                    disabled={loading || !available}
+                    onClick={() =>
+                      open({ action: "delete", target: key.id, name: key.name })
+                    }
+                    aria-label={`${key.name} 삭제`}
+                  >
+                    삭제
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : !error ? (
+          <EmptyState icon="key" title="등록된 Passkey가 없습니다.">
+            Passkey 추가 버튼에서 첫 번째 키를 등록하고 2차 인증을 시작하세요.
+          </EmptyState>
+        ) : null}
+        <div className="passkey-help">
+          <Icon name="info" />
+          <div>
+            <p>1Password 등 원하는 저장소에 Passkey를 보관할 수 있습니다.</p>
+            <p>모든 Passkey를 분실하면 서버 운영자에게 복구를 요청하세요.</p>
+          </div>
         </div>
-      )}
-      {notice && (
-        <div className="notice" role="status">
-          {notice}
+      </div>
+      {!loading && keys.length > 0 && (
+        <div className="passkey-footer">
+          <div>
+            <h3>2차 인증 해제</h3>
+            <p>
+              등록된 Passkey가 모두 삭제되며, 이후 비밀번호만으로 로그인합니다.
+            </p>
+          </div>
+          <button
+            className="danger"
+            disabled={!available}
+            onClick={() => open({ action: "disable" })}
+          >
+            2차 인증 해제
+          </button>
         </div>
-      )}
-      {!loading && !available && (
-        <p>
-          Passkey를 지원하는 브라우저와 HTTPS 도메인(로컬 개발은 localhost)이
-          필요합니다.
-        </p>
-      )}
-      <p>
-        1Password 등 원하는 저장소에 보관할 수 있습니다. 모두 분실하면 서버
-        운영자에게 복구를 요청하세요.
-      </p>
-      {keys.length > 0 && (
-        <ul className="passkey-list">
-          {keys.map((key) => (
-            <li key={key.id}>
-              <div>
-                <strong>{key.name}</strong>
-                <p>
-                  등록: {new Date(key.created).toLocaleString()} · 최근 사용:{" "}
-                  {key.last_used
-                    ? new Date(key.last_used).toLocaleString()
-                    : "없음"}
-                </p>
-              </div>
-              <button
-                disabled={!available}
-                onClick={() =>
-                  open({ action: "delete", target: key.id, name: key.name })
-                }
-                aria-label={`${key.name} 삭제`}
-              >
-                삭제
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {keys.length > 0 && (
-        <button
-          disabled={!available}
-          onClick={() => open({ action: "disable" })}
-        >
-          2차 인증 해제
-        </button>
       )}
       {action && (
         <Dialog
@@ -253,7 +327,7 @@ export function Passkeys({
                 취소
               </button>
               <button
-                className="primary"
+                className={action.action === "add" ? "primary" : "danger-solid"}
                 disabled={
                   busy || !password || (action.action === "add" && !name.trim())
                 }

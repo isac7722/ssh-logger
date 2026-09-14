@@ -52,7 +52,7 @@ test('optional Passkey enrollment, second factor, cancellation, last-key deletio
   expect((await page.request.get('/api/me')).status()).toBe(401);
   await page.getByRole('button', { name: 'Passkey로 인증', exact: true }).click();
   await accounts();
-  await expect(page.getByText('활성화됨 · 로그인 시', { exact: false })).toBeVisible();
+  await expect(page.getByText('활성화됨', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('button', { name: '브라우저 테스트 키 삭제' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
