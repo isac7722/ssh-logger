@@ -9,6 +9,7 @@
     "format": "prettier --write src vite.config.ts"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "14.0.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

@@ -137,9 +137,11 @@ func (s *Store) cleanup(ctx context.Context) error {
 			"DELETE FROM sessions WHERE rowid IN (SELECT rowid FROM sessions WHERE COALESCE(ended,started) < ? AND (live=0 OR server_id IN (SELECT id FROM servers WHERE last_seen < CAST(strftime('%s','now') AS INTEGER)*1000-60000 OR revoked=1)) LIMIT 1000)",
 			"DELETE FROM auth_sessions WHERE expires < ?",
 			"DELETE FROM login_attempts WHERE reset < ?",
+			"DELETE FROM auth_pending WHERE expires < ?",
+			"DELETE FROM auth_limits WHERE reset < ?",
 		} {
 			v := cutoff
-			if q == "DELETE FROM auth_sessions WHERE expires < ?" || q == "DELETE FROM login_attempts WHERE reset < ?" {
+			if q == "DELETE FROM auth_sessions WHERE expires < ?" || q == "DELETE FROM login_attempts WHERE reset < ?" || q == "DELETE FROM auth_pending WHERE expires < ?" || q == "DELETE FROM auth_limits WHERE reset < ?" {
 				v = time.Now().UnixMilli()
 			}
 			if _, e := tx.ExecContext(ctx, q, v); e != nil {

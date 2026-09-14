@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-const currentSchemaVersion = 5
+const currentSchemaVersion = 6
 
 func (s *Store) migrate() error {
 	tx, err := s.db.Begin()
@@ -64,6 +64,21 @@ func (s *Store) migrate() error {
 			"CREATE TABLE IF NOT EXISTS firewall_history(id TEXT PRIMARY KEY,server_id TEXT NOT NULL REFERENCES servers(id),revision TEXT NOT NULL,ip TEXT NOT NULL,action TEXT NOT NULL,requested_by TEXT NOT NULL,created INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending',error TEXT NOT NULL DEFAULT '')",
 			"CREATE INDEX IF NOT EXISTS firewall_history_server ON firewall_history(server_id,created DESC)",
 			"UPDATE schema_version SET version=5",
+		} {
+			if _, err = tx.Exec(q); err != nil {
+				return err
+			}
+		}
+	}
+	if version < 6 {
+		for _, q := range []string{
+			"CREATE TABLE account_auth(username TEXT PRIMARY KEY REFERENCES admins(username) ON DELETE CASCADE,user_id TEXT NOT NULL UNIQUE,version INTEGER NOT NULL DEFAULT 0)",
+			"CREATE TABLE passkeys(id TEXT PRIMARY KEY,username TEXT NOT NULL REFERENCES admins(username) ON DELETE CASCADE,rp_id TEXT NOT NULL,credential TEXT NOT NULL,name TEXT NOT NULL,created INTEGER NOT NULL,last_used INTEGER NOT NULL DEFAULT 0)",
+			"CREATE INDEX passkeys_username ON passkeys(username)",
+			"CREATE TABLE auth_pending(id_hash TEXT PRIMARY KEY,username TEXT NOT NULL REFERENCES admins(username) ON DELETE CASCADE,expires INTEGER NOT NULL,data TEXT NOT NULL)",
+			"CREATE INDEX auth_pending_username ON auth_pending(username)",
+			"CREATE TABLE auth_limits(key TEXT PRIMARY KEY,count INTEGER NOT NULL,reset INTEGER NOT NULL)",
+			"UPDATE schema_version SET version=6",
 		} {
 			if _, err = tx.Exec(q); err != nil {
 				return err

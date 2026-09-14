@@ -176,6 +176,9 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 		if n != 1 {
 			return errCredentialsChanged
 		}
+		if err = invalidatePending(tx, username); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(r.Context(), "DELETE FROM auth_sessions WHERE username=?", username)
 		return err
 	})

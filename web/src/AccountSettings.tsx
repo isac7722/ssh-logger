@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Dialog, EmptyState, Icon, PasswordField } from "./UI";
 
+import { Passkeys } from "./Passkeys";
+
 type Admin = { username: string; role: string; server_ids: string };
 type Props = {
   username: string;
@@ -8,6 +10,7 @@ type Props = {
   servers: Record<string, any>[];
   api: (path: string, method?: string, body?: unknown) => Promise<any>;
   onPasswordChanged: () => void;
+  onSecurityChanged: () => void;
 };
 const roleName = (role: string) =>
   role === "super_admin" ? "최고 관리자" : "일반 관리자";
@@ -16,6 +19,7 @@ export function AccountSettings({
   username,
   api,
   onPasswordChanged,
+  onSecurityChanged,
   superAdmin,
   servers,
 }: Props) {
@@ -86,6 +90,7 @@ export function AccountSettings({
         </div>
         <button onClick={() => open("password")}>비밀번호 변경</button>
       </section>
+      <Passkeys api={api} onLogout={onSecurityChanged} />
       {superAdmin && (
         <section className="panel">
           <div className="panel-head">

@@ -57,6 +57,11 @@ func (a *App) routes() http.Handler {
 		reply(w, 200, map[string]string{"status": "ok"})
 	})
 	m.HandleFunc("POST /api/login", a.login)
+	m.HandleFunc("POST /api/login/passkey/finish", a.passkeyLoginFinish)
+	m.HandleFunc("GET /api/me/passkeys", a.auth(a.passkeyList))
+	m.HandleFunc("POST /api/me/passkeys/begin", a.auth(a.passkeyBegin))
+	m.HandleFunc("POST /api/me/passkeys/finish", a.auth(a.passkeyFinish))
+	m.HandleFunc("POST /api/me/passkeys/register/finish", a.auth(a.registrationFinish))
 	m.HandleFunc("POST /api/ingest", a.ingest)
 	m.HandleFunc("GET /api/me", a.auth(func(w http.ResponseWriter, r *http.Request) {
 		var csrf, username string
@@ -192,34 +197,42 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		fail(w, 401, "계정 또는 비밀번호가 올바르지 않습니다.")
 		return
 	}
-	token, csrf := model.ID(), model.ID()
-	expires := time.Now().Add(12 * time.Hour)
-	e = a.store.transaction(r.Context(), func(tx *sql.Tx) error {
-		// Do not issue a session for a password changed during bcrypt verification.
-		res, e := tx.ExecContext(r.Context(), "INSERT INTO auth_sessions(token_hash,csrf,expires,username) SELECT ?,?,?,username FROM admins WHERE username=? AND password_hash=?", hash(token), csrf, expires.UnixMilli(), b.Username, h)
-		if e != nil {
-			return e
+	a.authTransaction(w, r, func(tx *sql.Tx) (any, error) {
+		var currentHash string
+		if err := tx.QueryRowContext(r.Context(), "SELECT password_hash FROM admins WHERE username=?", b.Username).Scan(&currentHash); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, invalidAuth()
+			}
+			return nil, err
 		}
-		n, e := res.RowsAffected()
-		if e != nil {
-			return e
+		if currentHash != h {
+			return nil, invalidAuth()
 		}
-		if n != 1 {
-			return errCredentialsChanged
+		var n int
+		if err := tx.QueryRow("SELECT COUNT(*) FROM passkeys WHERE username=?", b.Username).Scan(&n); err != nil {
+			return nil, err
 		}
-		_, e = tx.ExecContext(r.Context(), "DELETE FROM login_attempts WHERE ip=?", ip)
-		return e
+		if n > 0 {
+			if err := checkLimit(tx, "login:"+b.Username); err != nil {
+				return nil, err
+			}
+			wa, err := a.webAuthn()
+			if err != nil {
+				return nil, err
+			}
+			u, err := a.loadPasskeyUser(tx, b.Username, wa.Config.RPID)
+			if err != nil {
+				return nil, err
+			}
+			return a.beginCeremony(tx, wa, u, pendingAuth{Purpose: "login", IP: ip}, false)
+		}
+		result, err := createLoginSession(tx, b.Username)
+		if err != nil {
+			return nil, err
+		}
+		_, err = tx.Exec("DELETE FROM login_attempts WHERE ip=?", ip)
+		return result, err
 	})
-	if errors.Is(e, errCredentialsChanged) {
-		fail(w, 401, "비밀번호가 변경되었습니다. 다시 로그인하세요.")
-		return
-	}
-	if e != nil {
-		fail(w, 503, "로그인 저장에 실패했습니다.")
-		return
-	}
-	http.SetCookie(w, &http.Cookie{Name: "session", Value: token, Path: "/", HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: 43200})
-	reply(w, 200, map[string]string{"csrf": csrf, "username": b.Username})
 }
 func (a *App) logout(w http.ResponseWriter, r *http.Request) {
 	c, _ := r.Cookie("session")

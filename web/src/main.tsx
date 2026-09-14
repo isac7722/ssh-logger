@@ -1,3 +1,8 @@
+import {
+  startAuthentication,
+  browserSupportsWebAuthn,
+} from "@simplewebauthn/browser";
+import { passkeyError } from "./Passkeys";
 import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
@@ -65,13 +70,14 @@ async function api(path: string, method = "GET", body?: unknown) {
   });
   const data = await res.json();
   if (!res.ok) {
-    if (res.status === 401 && path !== "/login")
+    if (res.status === 401 && !path.startsWith("/login"))
       window.dispatchEvent(new Event("auth-expired"));
     throw new Error(data.error || "요청에 실패했습니다.");
   }
   return data;
 }
 function App() {
+  const [mfa, setMfa] = useState<any>(null);
   const [role, setRole] = useState("admin");
   const [activityMode, setActivityMode] = useState<ActivityMode>("important");
   const [activitySummary, setActivitySummary] =
@@ -280,7 +286,29 @@ function App() {
     setBusy(true);
     setError("");
     try {
-      await api("/login", "POST", { username: user, password });
+      if (mfa) {
+        if (!browserSupportsWebAuthn())
+          throw new Error("Passkey를 지원하는 브라우저에서 로그인하세요.");
+        const credential = await startAuthentication({
+          optionsJSON: mfa.options,
+        });
+        const pending = mfa;
+        setMfa(null);
+        await api("/login/passkey/finish", "POST", {
+          request_id: pending.request_id,
+          credential,
+        });
+      } else {
+        const result = await api("/login", "POST", {
+          username: user,
+          password,
+        });
+        setPassword("");
+        if (result.mfa_required) {
+          setMfa(result);
+          return;
+        }
+      }
       const x = await api("/me");
       csrf = x.csrf;
       setUser(x.username);
@@ -290,7 +318,7 @@ function App() {
       setNotice("");
       setAuth(true);
     } catch (e) {
-      setError((e as Error).message);
+      setError(passkeyError(e));
     } finally {
       setBusy(false);
     }
@@ -551,6 +579,12 @@ function App() {
   if (!auth)
     return (
       <Login
+        mfa={!!mfa}
+        onReset={() => {
+          setMfa(null);
+          setPassword("");
+          setError("");
+        }}
         username={user}
         password={password}
         onUsernameChange={setUser}
@@ -1061,6 +1095,15 @@ function App() {
               superAdmin={role === "super_admin"}
               servers={servers}
               api={api}
+              onSecurityChanged={() => {
+                csrf = "";
+                setAuth(false);
+                clearWorkspace();
+                setPassword("");
+                setMfa(null);
+                setError("");
+                setNotice("2차 인증 설정을 변경했습니다. 다시 로그인하세요.");
+              }}
               onPasswordChanged={() => {
                 csrf = "";
                 setAuth(false);

@@ -1891,3 +1891,9 @@ dl.confirmation-summary {
   margin: 12px 0;
   padding-left: 20px;
 }
+
+.passkey-list { list-style: none; padding: 0; }
+.passkey-list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--border, #ddd); }
+.passkey-list li div { min-width: 0; overflow-wrap: anywhere; }
+.passkey-list p { font-size: .85rem; }
+.passkey-fields { border: 0; padding: 0; margin: 0; display: grid; gap: 1rem; min-width: 0; }

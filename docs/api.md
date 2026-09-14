@@ -127,3 +127,30 @@ kind는 `login_success`, `login_failure`, `session_start`, `session_end`, `exec`
 수집 배치에 `can_firewall:true`, `can_allowlist:true` 및 선택적인 `firewall_result:{"revision":"...","error":""}`를 보낸다. `state[].capable`은 0(미지원), 1(기존 차단만 지원), 2(화이트리스트 지원)다. 정책은 매 heartbeat의 `firewall` 필드로 재전송하며 에이전트는 로컬 저장 후 적용하고 다음 배치에서 결과를 보고한다. 다른 서버·이전 revision·지원하지 않는 수집기의 결과로 완료 처리하지 않는다. 화이트리스트 정책은 구형 수집기에 전달하지 않는다. 중앙 서버를 먼저 업데이트한 뒤 수집기를 업데이트해야 한다.
 
 이력 `action`은 `allow`, `remove_allow`, `settings`와 이전 `ban`, `unban`을 포함한다. `status`는 `pending`, `succeeded`, `failed`, `superseded`다. 일반 관리자는 배정 서버의 목록만 변경할 수 있고 모드·포트 설정은 최고 관리자 전용이다. 활성 화이트리스트나 기존 차단 규칙이 남아 있거나 정책 해제의 적용 보고를 받지 못한 서버는 폐기할 수 없다(409).
+
+## Passkey 2차 인증
+
+최고·일반 관리자 모두 자신의 계정에서 선택적으로 활성화한다. 미활성화 계정의 로그인 응답은 기존과 같다. 활성화 계정은 `POST /api/login`의 비밀번호 검증 성공 시 세션 쿠키 없이 다음 응답을 받는다.
+
+```json
+{"mfa_required":true,"request_id":"일회용 요청 ID","step":"authenticate","options":{"challenge":"...","rpId":"...","allowCredentials":[],"userVerification":"discouraged"}}
+```
+
+`options`는 브라우저용 WebAuthn JSON 옵션이다. `startAuthentication({optionsJSON: options})` 결과를 `POST /api/login/passkey/finish`에 `{"request_id":"...","credential":{...}}`로 전송한다. 성공한 경우에만 기존과 같은 12시간 세션 쿠키와 `csrf`, `username` 응답을 발급한다. 두 로그인 API는 정확한 `Origin`이 필요하다. 인증 취소·미지원·검증 실패 시 비밀번호만으로 로그인하는 대체 경로는 없다.
+
+| API | 동작 |
+|---|---|
+| `GET /api/me/passkeys` | `enabled`, `available`, `passkeys` 반환. 목록에는 `id`, `name`, `created`, `last_used`(밀리초, 미사용은 0)가 포함된다 |
+| `POST /api/me/passkeys/begin` | `password`, `action`(`add`·`delete`·`disable`), 추가 시 `name`(공백 제거 후 1–80자), 삭제 시 `target`(credential ID)을 받는다 |
+| `POST /api/me/passkeys/finish` | 기존 Passkey 인증 결과 `{request_id,credential}`를 검증하여 요청한 삭제·해제를 실행하거나 추가 등록 옵션을 반환한다 |
+| `POST /api/me/passkeys/register/finish` | 등록 결과 `{request_id,credential}`를 검증하고 Passkey를 저장한다 |
+
+관리 API에는 로그인 세션·Origin·CSRF 토큰이 모두 필요하다. 최초 추가의 `begin`은 비밀번호 확인 후 `step: "register"`를 반환한다. 이미 활성화된 계정의 추가·삭제·해제는 비밀번호 확인 후 `step: "authenticate"`를 반환한다. 기존 키 인증이 성공한 추가 요청의 `finish`는 새 요청 ID와 `step: "register"`를 반환하며, 프론트는 `startRegistration({optionsJSON: options})` 후 등록 완료 API를 호출한다. 관리 요청의 작업·삭제 대상·새 키 이름은 시작 시 고정되어 완료 요청에서 바꿀 수 없다.
+
+모든 단계에는 5분 만료와 일회용 요청 ID가 적용된다. 관리 요청은 시작한 로그인 세션에 귀속된다. 서버 검증 실패 시 해당 요청은 소비되므로 처음부터 시작해야 한다. 브라우저 프롬프트 취소로 완료 요청을 보내지 않았다면 만료 전 같은 로그인 요청을 재시도할 수 있다. 잘못된 비밀번호·Passkey 검증은 계정별 관리/2차 로그인 한도 각각 15분간 10회로 제한하며 기존 비밀번호 로그인 IP 제한도 유지한다.
+
+관리 완료 응답의 `logout: true`는 현재 브라우저를 포함한 모든 세션 폐기를 의미한다. 최초 활성화, 마지막 키 삭제, 전체 해제가 이에 해당한다. 활성화 상태에서 추가·일부 삭제는 현재 세션만 유지하고 다른 세션을 폐기한다. 전체 해제는 등록된 키를 모두 삭제한다. 비밀번호 변경은 키를 유지하되 모든 세션과 인증 대기를 폐기한다. 계정 삭제 시 키·인증 대기도 삭제한다.
+
+Passkey는 `PUBLIC_ORIGIN`의 호스트명(RP ID)에 귀속된다. HTTP 원격 주소·IP 주소는 지원하지 않으며 로컬 개발에는 `http://localhost:<port>`를 사용한다. 도메인을 변경해 기존 키를 사용할 수 없게 되어도 2차 인증을 자동 해제하지 않는다. 이 경우 서버 운영자 복구가 필요하다.
+
+등록 및 인증은 `userVerification: "discouraged"`를 사용한다. 비밀번호와 Passkey 서명 검증은 유지하고, 기기의 추가 본인 확인(UV)은 필수로 검증하지 않는다. 사용자 참여(UP)는 계속 검증한다. 저장소/OS 자체 정책에 따라 잠금 해제 또는 승인 창이 표시될 수 있다. 변경 전에 시작한 인증 요청에는 이전 정책이 남으므로 처음부터 다시 시작한다.

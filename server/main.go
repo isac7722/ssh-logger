@@ -25,8 +25,18 @@ func env(k, d string) string {
 func main() {
 	restore := flag.String("restore", "", "restore snapshot while all server instances are stopped")
 	backup := flag.String("backup", "", "write consistent SQLite snapshot to a NEW path")
+	reset2FA := flag.String("reset-2fa", "", "remove all passkeys and sessions for an existing account")
 	health := flag.Bool("healthcheck", false, "probe local service")
 	flag.Parse()
+	modes := 0
+	for _, active := range []bool{*restore != "", *backup != "", *reset2FA != "", *health} {
+		if active {
+			modes++
+		}
+	}
+	if modes > 1 {
+		log.Fatal("maintenance flags are mutually exclusive")
+	}
 	if *health {
 		c := http.Client{Timeout: 3 * time.Second}
 		r, e := c.Get("http://127.0.0.1:8080/api/health")
@@ -52,6 +62,15 @@ func main() {
 		log.Fatal(e)
 	}
 	defer s.db.Close()
+	if *reset2FA != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := s.resetTwoFactor(ctx, *reset2FA); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("Two-factor authentication reset for %s; all sessions revoked\n", *reset2FA)
+		return
+	}
 	if *backup != "" {
 		dest, e := filepath.Abs(*backup)
 		if e != nil {

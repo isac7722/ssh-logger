@@ -15,6 +15,7 @@ func TestLegacyDatabaseMigrationAndBackupRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropPasskeySchema(t, s)
 	_, err = s.db.Exec(`ALTER TABLE events DROP COLUMN pid; ALTER TABLE events DROP COLUMN ppid; UPDATE schema_version SET version=1;
  INSERT INTO admins VALUES('existing-admin','existing-hash');
  INSERT INTO servers(id,name,token_hash,created) VALUES('s','legacy','hash',1);
@@ -97,6 +98,7 @@ func TestVersionTwoMigrationInvalidatesUnownedSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropPasskeySchema(t, s)
 	_, err = s.db.Exec(`INSERT INTO admins VALUES('existing','hash');
  DROP TABLE auth_sessions;
  CREATE TABLE auth_sessions(token_hash TEXT PRIMARY KEY,csrf TEXT NOT NULL,expires INTEGER NOT NULL);
@@ -142,6 +144,7 @@ func TestVersionFourGrantsExistingAdminsAndPreservesAssignments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropPasskeySchema(t, s)
 	_, err = s.db.Exec(`DROP TABLE admin_servers;DROP TABLE admin_roles;DROP TABLE firewall_history;DROP TABLE firewall_policies;
  INSERT INTO admins VALUES('existing','hash');UPDATE schema_version SET version=4;`)
 	if err != nil {
@@ -165,5 +168,39 @@ func TestVersionFourGrantsExistingAdminsAndPreservesAssignments(t *testing.T) {
 	}
 	if err = s.db.QueryRow("SELECT role FROM admin_roles WHERE username='new'").Scan(&role); err != nil || role != "admin" {
 		t.Fatal("repeat migration promoted restricted admin", role, err)
+	}
+}
+
+func dropPasskeySchema(t *testing.T, s *Store) {
+	t.Helper()
+	if _, err := s.db.Exec("DROP TABLE auth_pending; DROP TABLE passkeys; DROP TABLE account_auth; DROP TABLE auth_limits;"); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestVersionFivePasskeyMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v5.db")
+	s, err := openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dropPasskeySchema(t, s)
+	if _, err = s.db.Exec("INSERT INTO admins VALUES('existing','hash'); INSERT INTO auth_sessions VALUES('token','csrf',9999999999999,'existing'); UPDATE schema_version SET version=5;"); err != nil {
+		t.Fatal(err)
+	}
+	s.db.Close()
+	s, err = openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.db.Close()
+	var n int
+	if err = s.db.QueryRow("SELECT COUNT(*) FROM passkeys").Scan(&n); err != nil || n != 0 {
+		t.Fatal(n, err)
+	}
+	if err = s.db.QueryRow("SELECT COUNT(*) FROM auth_sessions").Scan(&n); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	if err = s.migrate(); err != nil {
+		t.Fatal(err)
 	}
 }
