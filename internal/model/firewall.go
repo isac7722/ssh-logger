@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"net/netip"
+	"unicode/utf8"
 )
 
 type IPBan struct {
@@ -10,12 +11,13 @@ type IPBan struct {
 	Disconnect bool   `json:"disconnect"`
 }
 type FirewallPolicy struct {
-	Revision  string   `json:"revision"`
-	Mode      string   `json:"mode,omitempty"` // Empty is the legacy denylist policy.
-	Allowed   []string `json:"allowed,omitempty"`
-	Ports     []int    `json:"ports"`
-	Protected []string `json:"protected"`
-	Bans      []IPBan  `json:"bans"`
+	Revision     string            `json:"revision"`
+	Mode         string            `json:"mode,omitempty"` // Empty is the legacy denylist policy.
+	Allowed      []string          `json:"allowed,omitempty"`
+	AllowedNames map[string]string `json:"allowed_names,omitempty"`
+	Ports        []int             `json:"ports"`
+	Protected    []string          `json:"protected"`
+	Bans         []IPBan           `json:"bans"`
 }
 type FirewallResult struct {
 	Revision string `json:"revision"`
@@ -53,6 +55,11 @@ func (p FirewallPolicy) Validate() error {
 			return fmt.Errorf("중복 또는 잘못된 허용 IP입니다.")
 		}
 		allowed[ip] = true
+	}
+	for ip, name := range p.AllowedNames {
+		if !allowed[ip] || utf8.RuneCountInString(name) > 100 {
+			return fmt.Errorf("허용 IP 이름은 등록된 IP에만 지정할 수 있으며 최대 100자입니다.")
+		}
 	}
 	if p.Revision == "" || len(p.Revision) > 100 || len(p.Ports) == 0 || len(p.Ports) > 32 || len(p.Protected) > 1000 || len(p.Bans) > 1000 {
 		return fmt.Errorf("잘못된 방화벽 정책입니다.")

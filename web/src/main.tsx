@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 import { Firewall } from "./Firewall";
 import { AccountSettings } from "./AccountSettings";
-import { Icon } from "./UI";
+import { Dialog, Icon } from "./UI";
 import { Login } from "./Login";
 import {
   ActivityControls,
@@ -73,15 +73,6 @@ async function api(path: string, method = "GET", body?: unknown) {
 }
 function App() {
   const [role, setRole] = useState("admin");
-  const [accessTarget, setAccessTarget] = useState<{
-    server: string;
-    ip: string;
-  }>();
-  function openAccess(server: string, ip: string) {
-    setAccessTarget({ server, ip });
-    navigate("firewall");
-    setSelected(null);
-  }
   const [activityMode, setActivityMode] = useState<ActivityMode>("important");
   const [activitySummary, setActivitySummary] =
     useState<ActivitySummary | null>(null);
@@ -112,6 +103,10 @@ function App() {
     [detail, setDetail] = useState<Row[]>([]),
     [detailPage, setDetailPage] = useState(0),
     [detailError, setDetailError] = useState("");
+  const [editingServer, setEditingServer] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [serverName, setServerName] = useState(""),
     [credential, setCredential] = useState<Row | null>(null),
     [retention, setRetention] = useState(30),
@@ -125,7 +120,7 @@ function App() {
     setSelected(null);
     setDetail([]);
     setCredential(null);
-    setAccessTarget(undefined);
+    setEditingServer(null);
     setServer("");
     setAccount("");
     setIP("");
@@ -199,12 +194,18 @@ function App() {
               ? current
               : null,
           );
-          if (x.me.role !== "super_admin") setCredential(null);
+          setCredential((current) =>
+            current && x.ss.some((s: Row) => s.id === current.id)
+              ? current
+              : null,
+          );
+          setEditingServer((current) =>
+            current && x.ss.some((s: Row) => s.id === current.id)
+              ? current
+              : null,
+          );
           setRole(x.me.role);
-          if (
-            x.me.role !== "super_admin" &&
-            ["servers", "settings"].includes(view)
-          )
+          if (x.me.role !== "super_admin" && view === "settings")
             setView("overview");
           setStats(x.overview[0] || {});
           setRows(x.ev.items || []);
@@ -284,8 +285,7 @@ function App() {
       csrf = x.csrf;
       setUser(x.username);
       setRole(x.role || "admin");
-      if (x.role !== "super_admin" && ["servers", "settings"].includes(view))
-        setView("overview");
+      if (x.role !== "super_admin" && view === "settings") setView("overview");
       setPassword("");
       setNotice("");
       setAuth(true);
@@ -397,14 +397,7 @@ function App() {
                   </>
                 )}
               </td>
-              <td>
-                {r.ip || "—"}
-                {r.ip && (
-                  <button onClick={() => openAccess(r.server_id, r.ip)}>
-                    IP 허용
-                  </button>
-                )}
-              </td>
+              <td>{r.ip || "—"}</td>
               <td>
                 {r.linked ? (
                   <span className="dot-label">연결됨</span>
@@ -477,11 +470,6 @@ function App() {
               <td>
                 {s.user || "알 수 없음"}
                 <small>{s.ip || "IP 없음"}</small>
-                {s.ip && (
-                  <button onClick={() => openAccess(s.server_id, s.ip)}>
-                    IP 허용
-                  </button>
-                )}
               </td>
               <td className="time">{fmt(s.started)}</td>
               <td className="time">{fmt(s.ended)}</td>
@@ -513,7 +501,7 @@ function App() {
                 >
                   상세 보기 ↗
                 </button>
-                {s.status === "active" && (
+                {view === "sessions" && s.status === "active" && (
                   <button
                     className="danger"
                     disabled={
@@ -596,10 +584,7 @@ function App() {
               "firewall",
             ] as View[]
           )
-            .filter(
-              (v) =>
-                role === "super_admin" || !["servers", "settings"].includes(v),
-            )
+            .filter((v) => role === "super_admin" || v !== "settings")
             .map((v) => (
               <button
                 key={v}
@@ -859,7 +844,7 @@ function App() {
               </div>
             </section>
           )}
-          {view === "servers" && role === "super_admin" && (
+          {view === "servers" && (
             <>
               <section className="panel">
                 <div className="panel-head">
@@ -868,6 +853,11 @@ function App() {
                     토큰은 발급 시 한 번만 표시됩니다.
                   </span>
                 </div>
+                {role !== "super_admin" && (
+                  <p className="panel-note">
+                    등록 시점의 모든 일반 관리자에게 이 서버가 자동 배정됩니다.
+                  </p>
+                )}
                 <form
                   className="inline-form"
                   onSubmit={(e) => {
@@ -942,7 +932,7 @@ function App() {
                         <th>수집 상태</th>
                         <th>마지막 수신</th>
                         <th>전송 대기 / 손실·공백</th>
-                        <th>인증 관리</th>
+                        <th>서버 관리</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -966,6 +956,15 @@ function App() {
                             {s.backlog} / {s.dropped}
                           </td>
                           <td className="actions">
+                            <button
+                              disabled={busy}
+                              onClick={() => {
+                                setError("");
+                                setEditingServer({ id: s.id, name: s.name });
+                              }}
+                            >
+                              정보 수정
+                            </button>
                             <button
                               disabled={busy}
                               onClick={() => {
@@ -1054,7 +1053,6 @@ function App() {
               api={api}
               servers={servers}
               superAdmin={role === "super_admin"}
-              initial={accessTarget}
             />
           )}
           {view === "accounts" && (
@@ -1165,6 +1163,67 @@ function App() {
             {pager(detail, detailPage, setDetailPage)}
           </section>
         </div>
+      )}
+      {editingServer && (
+        <Dialog
+          title="서버 정보 수정"
+          description="서버 이름을 변경합니다."
+          onClose={() => setEditingServer(null)}
+          busy={busy}
+        >
+          <form
+            className="stack-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              action(async () => {
+                const name = editingServer.name.trim();
+                await api(`/servers/${editingServer.id}`, "PUT", { name });
+                setCredential((current) =>
+                  current?.id === editingServer.id
+                    ? { ...current, name }
+                    : current,
+                );
+                setEditingServer(null);
+                setServers(await api("/servers"));
+                setNotice("서버 정보를 수정했습니다.");
+              });
+            }}
+          >
+            <label>
+              서버 이름
+              <input
+                required
+                maxLength={100}
+                autoFocus
+                value={editingServer.name}
+                disabled={busy}
+                onChange={(event) =>
+                  setEditingServer({
+                    ...editingServer,
+                    name: event.target.value,
+                  })
+                }
+              />
+            </label>
+            {error && (
+              <div className="alert" role="alert">
+                {error}
+              </div>
+            )}
+            <div className="dialog-actions">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setEditingServer(null)}
+              >
+                취소
+              </button>
+              <button className="primary" disabled={busy}>
+                저장
+              </button>
+            </div>
+          </form>
+        </Dialog>
       )}
     </div>
   );

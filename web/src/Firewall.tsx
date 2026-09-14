@@ -15,6 +15,7 @@ type Pending = {
   body?: unknown;
   ip?: string;
   detail: string;
+  name?: string;
 };
 const tabs: { id: Tab; label: string }[] = [
   { id: "allowed", label: "허용 IP" },
@@ -26,6 +27,10 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
   const [server, setServer] = useState(initial?.server || "");
   const [ip, setIP] = useState(initial?.ip || "");
 
+  const [name, setName] = useState("");
+  const [editing, setEditing] = useState<{ ip: string; name: string } | null>(
+    null,
+  );
   const [data, setData] = useState<Row | null>(null);
   const [ports, setPorts] = useState("22");
   const [mode, setMode] = useState("off");
@@ -82,6 +87,8 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
     setPending(null);
 
     setIP("");
+    setName("");
+    setEditing(null);
     setPorts("22");
     setMode("off");
     dirty.current = false;
@@ -108,8 +115,10 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
       if (pending.path === "/firewall/settings") dirty.current = false;
       if (pending.method === "POST") {
         setIP("");
+        setName("");
       }
       setPending(null);
+      setEditing(null);
       setNotice("요청을 저장했습니다.");
       setRefresh((value) => value + 1);
     } catch (e) {
@@ -320,7 +329,8 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                         path: "/allowlist",
                         method: "POST",
                         ip: ip.trim(),
-                        body: { ip: ip.trim() },
+                        body: { ip: ip.trim(), name: name.trim() },
+                        name: name.trim(),
                         detail: enabled
                           ? "이 IP에서 새 SSH 연결을 시작할 수 있도록 허용합니다. 다른 방화벽과 SSH 인증 설정은 유지됩니다."
                           : "허용 목록에 IP를 등록합니다. 접속을 제한하려면 방화벽 설정에서 화이트리스트를 켜세요.",
@@ -339,6 +349,16 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                           autoComplete="off"
                           spellCheck={false}
                           aria-describedby="allowed-ip-hint"
+                        />
+                      </label>
+                      <label>
+                        이름 (선택)
+                        <input
+                          value={name}
+                          onChange={(event) => setName(event.target.value)}
+                          maxLength={100}
+                          placeholder="예: 사무실, 자택"
+                          disabled={controlsDisabled}
                         />
                       </label>
                       <button className="primary" disabled={controlsDisabled}>
@@ -368,6 +388,7 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                         <thead>
                           <tr>
                             <th scope="col">IP</th>
+                            <th scope="col">이름</th>
                             <th scope="col">상태</th>
                             <th scope="col" className="action-cell">
                               관리
@@ -378,6 +399,9 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                           {allowed.map((address) => (
                             <tr key={address}>
                               <td className="numeric">{address}</td>
+                              <td>
+                                {data.policy.allowed_names?.[address] || "—"}
+                              </td>
                               <td>
                                 <span
                                   className={`status-pill ${enabled ? tone : "warning"}`}
@@ -390,6 +414,20 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                                 </span>
                               </td>
                               <td className="action-cell">
+                                <button
+                                  disabled={controlsDisabled}
+                                  onClick={() => {
+                                    setError("");
+                                    setEditing({
+                                      ip: address,
+                                      name:
+                                        data.policy.allowed_names?.[address] ||
+                                        "",
+                                    });
+                                  }}
+                                >
+                                  수정
+                                </button>
                                 <button
                                   className="danger"
                                   disabled={
@@ -604,6 +642,7 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                             <td>
                               {{
                                 allow: "허용 IP 추가",
+                                update_allow: "허용 IP 이름 변경",
                                 remove_allow: "허용 IP 삭제",
                                 ban: "IP 차단 (이전)",
                                 unban: "차단 해제 (이전)",
@@ -658,6 +697,60 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
           </div>
         </>
       )}
+      {editing && !pending && host && (
+        <Dialog
+          title="허용 IP 이름 수정"
+          description="등록된 IP의 이름을 변경합니다."
+          onClose={() => {
+            setEditing(null);
+            setError("");
+          }}
+          busy={busy}
+        >
+          <form
+            className="stack-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              confirmAction({
+                title: "허용 IP 이름 변경 확인",
+                path: `/allowlist/${encodeURIComponent(editing.ip)}`,
+                method: "PUT",
+                ip: editing.ip,
+                name: editing.name.trim(),
+                body: { name: editing.name.trim() },
+                detail:
+                  "이 IP의 이름을 변경합니다. 이름을 비워 저장하면 이름이 삭제됩니다.",
+              });
+            }}
+          >
+            <label>
+              IP 주소
+              <input value={editing.ip} readOnly />
+            </label>
+            <label>
+              이름
+              <input
+                value={editing.name}
+                maxLength={100}
+                autoFocus
+                onChange={(event) =>
+                  setEditing({ ...editing, name: event.target.value })
+                }
+                disabled={controlsDisabled}
+              />
+            </label>
+            <small>이름은 최대 100자이며, 비워 두면 삭제됩니다.</small>
+            <div className="dialog-actions">
+              <button type="button" onClick={() => setEditing(null)}>
+                취소
+              </button>
+              <button className="primary" disabled={controlsDisabled}>
+                저장
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      )}
       {pending && host && (
         <Dialog
           title={pending.title}
@@ -678,6 +771,12 @@ export function Firewall({ api, servers, superAdmin, initial }: Props) {
                 <div>
                   <dt>IP 주소</dt>
                   <dd className="numeric">{pending.ip}</dd>
+                </div>
+              )}
+              {pending.name !== undefined && (
+                <div>
+                  <dt>이름</dt>
+                  <dd>{pending.name || "없음"}</dd>
                 </div>
               )}
             </dl>

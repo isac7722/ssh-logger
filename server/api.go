@@ -73,9 +73,11 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("POST /api/admins", a.auth(a.super(a.createAdmin)))
 	m.HandleFunc("DELETE /api/admins/{username}", a.auth(a.super(a.deleteAdmin)))
 	m.HandleFunc("GET /api/servers", a.auth(a.servers))
-	m.HandleFunc("POST /api/servers", a.auth(a.super(a.createServer)))
-	m.HandleFunc("POST /api/servers/{id}/rotate", a.auth(a.super(a.rotate)))
-	m.HandleFunc("POST /api/servers/{id}/revoke", a.auth(a.super(a.revoke)))
+	m.HandleFunc("POST /api/servers", a.auth(a.createServer))
+	m.HandleFunc("PUT /api/servers/{id}", a.auth(a.assigned(a.updateServer)))
+	m.HandleFunc("DELETE /api/servers/{id}", a.auth(a.assigned(a.revoke)))
+	m.HandleFunc("POST /api/servers/{id}/rotate", a.auth(a.assigned(a.rotate)))
+	m.HandleFunc("POST /api/servers/{id}/revoke", a.auth(a.assigned(a.revoke)))
 	m.HandleFunc("GET /api/events", a.auth(a.events))
 	m.HandleFunc("GET /api/sessions", a.auth(a.sessions))
 	m.HandleFunc("POST /api/servers/{id}/sessions/{session}/terminate", a.auth(a.assigned(a.terminateSession)))
@@ -85,6 +87,7 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("POST /api/servers/{id}/bans", a.auth(a.assigned(a.banIP)))
 	m.HandleFunc("DELETE /api/servers/{id}/bans/{ip}", a.auth(a.assigned(a.unbanIP)))
 	m.HandleFunc("POST /api/servers/{id}/allowlist", a.auth(a.assigned(a.allowIP)))
+	m.HandleFunc("PUT /api/servers/{id}/allowlist/{ip}", a.auth(a.assigned(a.updateAllowedIP)))
 	m.HandleFunc("DELETE /api/servers/{id}/allowlist/{ip}", a.auth(a.assigned(a.removeAllowedIP)))
 	m.HandleFunc("GET /api/overview", a.auth(a.overview))
 	m.HandleFunc("GET /api/settings", a.auth(a.super(a.settings)))
@@ -256,8 +259,14 @@ func (a *App) createServer(w http.ResponseWriter, r *http.Request) {
 	}
 	id, token := model.ID(), model.ID()
 	e := a.store.transaction(r.Context(), func(tx *sql.Tx) error {
-		_, e := tx.ExecContext(r.Context(), "INSERT INTO servers(id,name,token_hash,created) VALUES(?,?,?,?)", id, b.Name, hash(token), time.Now().UnixMilli())
-		return e
+		if _, e := tx.ExecContext(r.Context(), "INSERT INTO servers(id,name,token_hash,created) VALUES(?,?,?,?)", id, b.Name, hash(token), time.Now().UnixMilli()); e != nil {
+			return e
+		}
+		if identity(r).Role != "super_admin" {
+			_, e := tx.ExecContext(r.Context(), "INSERT INTO admin_servers(username,server_id) SELECT a.username,? FROM admins a LEFT JOIN admin_roles r ON r.username=a.username WHERE COALESCE(r.role,'admin')='admin'", id)
+			return e
+		}
+		return nil
 	})
 	if e != nil {
 		fail(w, 409, "서버를 등록할 수 없습니다. 중복 이름인지 확인하세요.")
@@ -265,6 +274,38 @@ func (a *App) createServer(w http.ResponseWriter, r *http.Request) {
 	}
 	reply(w, 201, map[string]string{"id": id, "token": token})
 }
+func (a *App) updateServer(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Name string `json:"name"`
+	}
+	if !decode(w, r, &b) {
+		return
+	}
+	b.Name = strings.TrimSpace(b.Name)
+	if len(b.Name) < 1 || len(b.Name) > 100 {
+		fail(w, 400, "서버 이름은 1–100바이트로 입력하세요.")
+		return
+	}
+	var count int64
+	err := a.store.transaction(r.Context(), func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(r.Context(), "UPDATE servers SET name=? WHERE id=? AND revoked=0 AND "+scope(r, "id"), b.Name, r.PathValue("id"))
+		if err != nil {
+			return err
+		}
+		count, err = result.RowsAffected()
+		return err
+	})
+	if err != nil {
+		fail(w, 409, "서버 이름을 변경할 수 없습니다. 중복 이름인지 확인하세요.")
+		return
+	}
+	if count == 0 {
+		fail(w, 404, "접근 가능한 서버가 없습니다.")
+		return
+	}
+	reply(w, 200, map[string]bool{"ok": true})
+}
+
 func (a *App) rotate(w http.ResponseWriter, r *http.Request) { a.changeToken(w, r, false) }
 func (a *App) revoke(w http.ResponseWriter, r *http.Request) { a.changeToken(w, r, true) }
 func (a *App) changeToken(w http.ResponseWriter, r *http.Request, revoke bool) {
@@ -281,7 +322,7 @@ func (a *App) changeToken(w http.ResponseWriter, r *http.Request, revoke bool) {
 				return pendingFirewall
 			}
 		}
-		v, e := tx.ExecContext(r.Context(), "UPDATE servers SET token_hash=?,revoked=? WHERE id=? AND revoked=0", hash(token), revoke, r.PathValue("id"))
+		v, e := tx.ExecContext(r.Context(), "UPDATE servers SET token_hash=?,revoked=? WHERE id=? AND revoked=0 AND "+scope(r, "id"), hash(token), revoke, r.PathValue("id"))
 		if e != nil {
 			return e
 		}

@@ -75,8 +75,8 @@ func TestServerAssignmentsEnforcedEverywhere(t *testing.T) {
 		body         any
 		want         int
 	}{
-		{"GET", "/api/admins", nil, 403}, {"GET", "/api/settings", nil, 403}, {"POST", "/api/servers", map[string]string{"name": "bad"}, 403},
-		{"POST", "/api/servers/" + s1["id"] + "/rotate", nil, 403}, {"POST", "/api/servers/" + s1["id"] + "/revoke", nil, 403},
+		{"GET", "/api/admins", nil, 403}, {"GET", "/api/settings", nil, 403},
+		{"POST", "/api/servers/" + s2["id"] + "/rotate", nil, 404}, {"POST", "/api/servers/" + s2["id"] + "/revoke", nil, 404},
 		{"PUT", "/api/admins/operator/access", map[string]any{"role": "super_admin"}, 403},
 		{"GET", "/api/servers/" + s2["id"] + "/firewall", nil, 404},
 		{"POST", "/api/servers/" + s2["id"] + "/bans", model.IPBan{IP: "203.0.113.5"}, 404},

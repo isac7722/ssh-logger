@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"sshlogger/internal/model"
+	"strings"
 	"time"
 )
 
@@ -179,7 +180,8 @@ func (a *App) firewallSettings(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) allowIP(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		IP string `json:"ip"`
+		IP   string  `json:"ip"`
+		Name *string `json:"name"`
 	}
 	if !decode(w, r, &b) {
 		return
@@ -190,6 +192,7 @@ func (a *App) allowIP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.changeFirewall(w, r, ip, "allow", func(p *model.FirewallPolicy) error {
+		setAllowedName(p, ip, b.Name)
 		for _, existing := range p.Allowed {
 			if existing == ip {
 				return nil
@@ -197,6 +200,49 @@ func (a *App) allowIP(w http.ResponseWriter, r *http.Request) {
 		}
 		p.Allowed = append(p.Allowed, ip)
 		return nil
+	})
+}
+
+// Names are optional metadata; keep the allowed address array compatible with existing agents.
+func setAllowedName(p *model.FirewallPolicy, ip string, name *string) {
+	if name == nil {
+		return
+	}
+	value := strings.TrimSpace(*name)
+	if value == "" {
+		delete(p.AllowedNames, ip)
+		return
+	}
+	if p.AllowedNames == nil {
+		p.AllowedNames = map[string]string{}
+	}
+	p.AllowedNames[ip] = value
+}
+
+func (a *App) updateAllowedIP(w http.ResponseWriter, r *http.Request) {
+	ip, err := model.CanonicalIP(r.PathValue("ip"))
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	var b struct {
+		Name *string `json:"name"`
+	}
+	if !decode(w, r, &b) {
+		return
+	}
+	if b.Name == nil {
+		fail(w, 400, "변경할 이름을 입력하세요.")
+		return
+	}
+	a.changeFirewall(w, r, ip, "update_allow", func(p *model.FirewallPolicy) error {
+		for _, existing := range p.Allowed {
+			if existing == ip {
+				setAllowedName(p, ip, b.Name)
+				return nil
+			}
+		}
+		return errors.New("등록된 허용 IP를 찾을 수 없습니다.")
 	})
 }
 
@@ -214,6 +260,7 @@ func (a *App) removeAllowedIP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		p.Allowed = allowed
+		delete(p.AllowedNames, ip)
 		return nil
 	})
 }

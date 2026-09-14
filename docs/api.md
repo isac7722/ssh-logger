@@ -33,6 +33,8 @@ Super admin만 계정 목록·생성·삭제·권한 배정 API에 접근한다.
 | `GET /api/overview?day_start=<ms>` | 현재 세션, 오늘 세션 시작·인증 실패 기록, 서버 수집 상태 집계 |
 | `GET /api/servers` | 폐기되지 않은 서버 상태 및 누적 손실·공백 카운터 |
 | `POST /api/servers` | `{"name":"prod-01"}` 등록, id/token 한 번 반환 |
+| `PUT /api/servers/{id}` | `{"name":"prod-02"}` 서버 이름 수정. 이름은 1–100바이트, 중복은 409 |
+| `DELETE /api/servers/{id}` | 서버 논리 삭제. `/revoke`와 동일하며 DB 기록 유지 |
 | `POST /api/servers/{id}/rotate` | 기존 토큰 무효화, 새 토큰 반환 |
 | `POST /api/servers/{id}/revoke` | 서버 논리 삭제 및 수집 인증 폐기, DB 기록 유지 |
 | `GET /api/events` | 활동 검색 |
@@ -104,18 +106,19 @@ kind는 `login_success`, `login_failure`, `session_start`, `session_end`, `exec`
 
 `PUT /api/admins/{username}/access`는 super admin 전용이며 `{"role":"admin","server_ids":["server-id"]}`로 역할과 전체 배정 목록을 원자적으로 교체한다. 역할은 `admin` 또는 `super_admin`, 서버는 폐기되지 않은 등록 서버여야 한다. 마지막 super admin 강등과 잘못된 대상은 400, 일반 관리자 요청은 403이다. 미배정 계정은 모든 서버 목록·로그·집계에서 빈 결과를 받는다. 직접 서버 ID를 지정해도 우회할 수 없다. 서버별 제어·방화벽 API에서 미배정·폐기·없는 서버는 404다.
 
-서버 생성·토큰 재발급·폐기·보관 설정 API는 super admin 전용이다. 일반 관리자는 배정 서버의 허용 IP 추가·삭제 및 세션 종료를 요청할 수 있다. 로그인 세션의 현재 역할을 매 요청 확인하므로 재로그인 없이 변경된다. 기존 계정은 migration에서 super admin으로 이전하고, 새로 생성된 계정은 배정 없는 일반 관리자다.
+서버 생성은 모든 관리자가 할 수 있다. 일반 관리자가 등록하면 등록 트랜잭션 안에서 그 시점에 존재하는 모든 일반 관리자(등록자 포함)에게 자동 배정한다. 이후 생성된 일반 관리자에게는 소급 배정하지 않는다. Super admin이 등록하면 자동 배정하지 않는다. 서버 이름 수정·토큰 재발급·폐기·삭제는 super admin 또는 해당 서버에 배정된 일반 관리자만 가능하며 미배정·폐기·없는 서버는 404다. 보관 설정과 관리자 역할·서버 배정 변경은 super admin 전용이다. 일반 관리자는 배정 서버의 허용 IP 추가·삭제 및 세션 종료를 요청할 수 있다. 로그인 세션의 현재 역할을 매 요청 확인하므로 재로그인 없이 변경된다. 기존 계정은 migration에서 super admin으로 이전하고, 새로 생성된 계정은 배정 없는 일반 관리자다.
 
 ## SSH 화이트리스트 정책과 이력
 
 | API | 동작 |
 | --- | --- |
 | `GET /api/servers/{id}/firewall?page=0` | `policy`, `state` 배열(최대 1개), `history` 배열(최대 51개) 반환. 이력은 50개 단위 페이지 |
-| `POST /api/servers/{id}/allowlist` | `{"ip":"203.0.113.10"}`. 허용 IP 등록, 중복 등록은 멱등. 성공 202 |
+| `POST /api/servers/{id}/allowlist` | `{"ip":"203.0.113.10","name":"사무실"}`. 이름은 선택이며 최대 100자. 중복 등록 시 이름을 생략하면 기존 이름 유지, 지정하면 변경. 성공 202 |
+| `PUT /api/servers/{id}/allowlist/{ip}` | `{"name":"자택"}`. 기존 IP의 이름만 변경, IP 주소 변경은 불가. 빈 이름은 삭제. 미등록 IP는 400, 성공 202 |
 | `DELETE /api/servers/{id}/allowlist/{ip}` | 허용 IP 제거. 이미 없으면 멱등. 활성화 중 마지막 IP 제거는 400. IPv6 경로는 URL 인코딩 |
 | `PUT /api/servers/{id}/firewall/settings` | 최고 관리자 전용. `{"ports":[22,2222],"mode":"allowlist"}` 또는 `mode:"off"`. 성공 202 |
 
-변경 응답은 `{"revision":"...","status":"pending"}`이다. 정책은 `revision`, `ports`, `mode`, `allowed` 및 이전 버전 호환 필드 `protected`, `bans`로 구성된다. `mode`가 없으면 이전 차단 정책, `allowlist`이면 허용 목록 적용, `off`이면 이 도구의 접근 제한 해제다. `allowed`는 문자열 배열이며 빈 목록은 응답에서 생략될 수 있다. 프론트엔드는 `policy.allowed || []`로 처리한다. IP 추가만으로 모드를 바꾸지 않는다.
+변경 응답은 `{"revision":"...","status":"pending"}`이다. 정책은 `revision`, `ports`, `mode`, `allowed` 및 이전 버전 호환 필드 `protected`, `bans`로 구성된다. `mode`가 없으면 이전 차단 정책, `allowlist`이면 허용 목록 적용, `off`이면 이 도구의 접근 제한 해제다. `allowed`는 문자열 배열이며 빈 목록은 응답에서 생략될 수 있다. 프론트엔드는 `policy.allowed || []`로 처리한다. IP 추가만으로 모드를 바꾸지 않는다. `allowed_names`는 IP를 키로 하는 선택적 이름 맵(예: `{"203.0.113.10":"사무실"}`)이다. 기존 이름 없는 IP도 그대로 지원하며, 이름의 앞뒤 공백은 제거한다. 이름 수정은 `update_allow` 작업으로 변경 이력에 기록된다.
 
 화이트리스트 활성화에는 유효한 허용 IP 1개 이상과 수집기의 지원 확인이 필요하다. IP는 최대 1,000개의 단일 IPv4/IPv6 주소이며 IPv4-mapped IPv6를 정규화한다. 잘못된 IP·CIDR·루프백·멀티캐스트·미지정 주소, 빈 활성 목록, 잘못된 포트는 400이다. 포트는 1–65535이며 최대 32개다. 활성화된 목록에서 IP를 삭제해도 기존 SSH 연결은 유지하고 새 연결만 제한한다.
 
